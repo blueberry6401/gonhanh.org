@@ -108,6 +108,7 @@ private enum InjectionMethod {
     case autocomplete   // Spotlight fallback: Forward Delete + backspace + text via proxy
     case selectAll      // Select All + Replace: Cmd+A + type full buffer (for autocomplete apps)
     case axDirect       // Spotlight primary: AX API direct text manipulation (macOS 13+)
+    case passthrough    // iPhone Mirroring: pass through all keys (remote device handles input)
 }
 
 // MARK: - Text Injector
@@ -178,6 +179,9 @@ private class TextInjector {
             injectViaSelectAll(proxy: proxy)
         case .slow, .fast:
             injectViaBackspace(bs: bs, text: text, delays: delays)
+        case .passthrough:
+            // Should not reach here - passthrough is handled in keyboard callback
+            break
         }
 
         // Settle time: 20ms for slow apps, 5ms for others
@@ -428,8 +432,10 @@ private struct ImeResult {
     var action: UInt8
     var backspace: UInt8
     var count: UInt8
-    var _pad: UInt8
+    var flags: UInt8  // bit 0: key_consumed
 }
+
+private let FLAG_KEY_CONSUMED: UInt8 = 0x01  // Key was consumed by shortcut, don't pass through
 
 @_silgen_name("ime_init") private func ime_init()
 @_silgen_name("ime_key_ext") private func ime_key_ext(_ key: UInt16, _ caps: Bool, _ ctrl: Bool, _ shift: Bool) -> UnsafeMutablePointer<ImeResult>?
@@ -468,7 +474,8 @@ class RustBridge {
         Log.info("Engine initialized")
     }
 
-    static func processKey(keyCode: UInt16, caps: Bool, ctrl: Bool, shift: Bool = false) -> (Int, [Character])? {
+    /// Process a keystroke. Returns (backspace, chars, keyConsumed) or nil if no action.
+    static func processKey(keyCode: UInt16, caps: Bool, ctrl: Bool, shift: Bool = false) -> (Int, [Character], Bool)? {
         guard isInitialized, let ptr = ime_key_ext(keyCode, caps, ctrl, shift) else { return nil }
         defer { ime_free(ptr) }
 
@@ -480,7 +487,8 @@ class RustBridge {
                 (0..<Int(r.count)).compactMap { Unicode.Scalar(bound[$0]).map(Character.init) }
             }
         }
-        return (Int(r.backspace), chars)
+        let keyConsumed = (r.flags & FLAG_KEY_CONSUMED) != 0
+        return (Int(r.backspace), chars, keyConsumed)
     }
 
     static func setMethod(_ method: Int) {
@@ -959,6 +967,13 @@ private func keyboardCallback(
     // Detect injection method once per keystroke (expensive AX query)
     let (method, delays) = detectMethod()
 
+    // iPhone Mirroring and other passthrough apps: pass all keys directly
+    // These apps handle text input remotely and cannot receive macOS text injection
+    if method == .passthrough {
+        Log.key(keyCode, "pass")
+        return Unmanaged.passUnretained(event)
+    }
+
     // Arrow keys with any modifier (Cmd/Option/Shift) that moves cursor - clear buffer
     // Cmd+Arrow: move by line, Option+Arrow: move by word, Shift+: select
     // All of these invalidate the current composition context
@@ -1032,7 +1047,7 @@ private func keyboardCallback(
         }
 
         // First try Rust engine (handles immediate backspace-after-space)
-        if let (bs, chars) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
+        if let (bs, chars, _) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
             let str = String(chars)
             Log.transform(bs, str)
             sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
@@ -1059,18 +1074,15 @@ private func keyboardCallback(
         skipWordRestoreAfterClick = false
     }
 
-    if let (bs, chars) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
-        let str = String(chars)
-        Log.transform(bs, str)
+    if let (bs, chars, keyConsumed) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
+        Log.transform(bs, String(chars))
         sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
 
-        // If this was a break key (punctuation), pass it through after auto-restore
-        // The engine's auto-restore doesn't include the break character
-        // EXCEPTION: Space is already included by engine's try_auto_restore_on_space()
-        if keyCode != KeyCode.space && isBreakKey(keyCode, shift: shift) {
-            return Unmanaged.passUnretained(event)
-        }
-        return nil
+        // Pass through break keys (punctuation) for auto-restore, except:
+        // - Space: already handled by engine
+        // - Consumed keys: used by shortcuts (e.g., ">" in "->")
+        let shouldPassThrough = isBreakKey(keyCode, shift: shift) && keyCode != KeyCode.space && !keyConsumed
+        return shouldPassThrough ? Unmanaged.passUnretained(event) : nil
     }
 
     // For selectAll method: handle pass-through keys (space, punctuation, etc.)
@@ -1190,6 +1202,13 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     // Debug: log bundle and role for investigation
     Log.info("detect: \(bundleId) role=\(role ?? "nil")")
 
+    // iPhone Mirroring (ScreenContinuity) - pass through all keys
+    // The remote iOS device handles its own text input, macOS cannot inject text
+    if bundleId == "com.apple.ScreenContinuity" {
+        Log.method("pass:iphone")
+        return (.passthrough, (0, 0, 0))
+    }
+
     // Selection method for autocomplete UI elements (ComboBox, SearchField)
     if role == "AXComboBox" { Log.method("sel:combo"); return (.selection, (0, 0, 0)) }
     if role == "AXSearchField" { Log.method("sel:search"); return (.selection, (0, 0, 0)) }
@@ -1275,14 +1294,18 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     if bundleId == "com.microsoft.Word" { Log.method("slow:word"); return (.slow, (3000, 8000, 3000)) }
 
     // Electron apps - higher delays for reliable text replacement
+    // Notion code blocks need extra time for Monaco editor input processing (issue #132)
     if bundleId == "com.todesktop.230313mzl4w4u92" { Log.method("slow:claude"); return (.slow, (8000, 15000, 8000)) }
-    if bundleId == "notion.id" { Log.method("slow:notion"); return (.slow, (8000, 15000, 8000)) }
+    if bundleId == "notion.id" { Log.method("slow:notion"); return (.slow, (12000, 25000, 12000)) }
+
+    // Warp terminal - higher delays (modern terminal with complex input processing)
+    if bundleId == "dev.warp.Warp-Stable" { Log.method("slow:warp"); return (.slow, (8000, 15000, 8000)) }
 
     // Terminal/IDE apps - conservative delays for reliability
     let terminals = [
         // Terminals
         "com.apple.Terminal", "com.googlecode.iterm2", "io.alacritty",
-        "com.github.wez.wezterm", "com.mitchellh.ghostty", "dev.warp.Warp-Stable",
+        "com.github.wez.wezterm", "com.mitchellh.ghostty",
         "net.kovidgoyal.kitty", "co.zeit.hyper", "org.tabby", "com.raphaelamorim.rio",
         "com.termius-dmg.mac",
         // IDEs/Editors

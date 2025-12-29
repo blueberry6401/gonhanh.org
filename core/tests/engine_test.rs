@@ -589,18 +589,19 @@ fn delayed_circumflex_diphthong_pattern() {
 
 #[test]
 fn delayed_circumflex_auto_restore_space() {
-    // Auto-restore on space: if no mark was typed, restore to raw input
-    // This handles English words like "data" that look like Vietnamese patterns
+    // V+C+V circumflex patterns with stop consonant finals (t/c/p) WITHOUT mark
+    // are almost never real Vietnamese words → restore to English
+    // Compare: "tốt" (with sắc) is Vietnamese, but "tôt" (no mark) is not
     use gonhanh_core::utils::type_word;
 
     let cases = [
-        ("toto ", "toto "),  // No mark → restore
-        ("data ", "data "),  // No mark → restore
-        ("dataa ", "data "), // Revert: dataa → data (no restore needed, already plain)
-        ("noto ", "noto "),  // No mark → restore
-        ("hete ", "hete "),  // No mark → restore
-        ("tetee ", "tete "), // Revert: tetee → tete (no restore needed)
-        ("cocoo ", "coco "), // Revert: cocoo → coco (no restore needed)
+        ("toto ", "toto "),  // tôt (no mark) is NOT real VI → restore to English
+        ("data ", "data "),  // dât (no mark) is NOT real VI → restore to English
+        ("dataa ", "data "), // Revert: dataa → data (circumflex reverted)
+        ("noto ", "noto "),  // nôt (no mark) is NOT real VI → restore to English
+        ("hete ", "hete "),  // hêt (no mark) is NOT real VI → restore to English
+        ("tetee ", "tete "), // Revert: tetee → tete (circumflex reverted)
+        ("cocoo ", "coco "), // Revert: cocoo → coco (circumflex reverted)
     ];
 
     for (input, expected) in cases {
@@ -637,15 +638,16 @@ fn delayed_circumflex_valid_vietnamese_stays() {
 
 #[test]
 fn delayed_circumflex_punctuation_restore() {
-    // Punctuation marks (comma, dot, semicolon, colon, @) also trigger auto-restore
+    // Punctuation marks trigger auto-restore for INVALID Vietnamese
+    // V+C+V circumflex with stop consonant (t/c/p) without mark → restore to English
     use gonhanh_core::utils::type_word;
 
     let cases = [
-        ("toto,", "toto,"), // Comma triggers restore
-        ("data.", "data."), // Dot triggers restore
-        ("data;", "data;"), // Semicolon triggers restore
-        ("dausa,", "dấu,"), // Valid Vietnamese stays (with punctuation)
-        ("user.", "user."), // English word + dot
+        ("toto,", "toto,"), // tôt (no mark) is NOT real VI → restore to English
+        ("data.", "data."), // dât (no mark) is NOT real VI → restore to English
+        ("data;", "data;"), // dât (no mark) is NOT real VI → restore to English
+        ("dausa,", "dấu,"), // Valid Vietnamese stays (with mark)
+        ("user.", "user."), // English word + dot (usẻ invalid VI → restore)
         ("user,", "user,"), // English word + comma
         ("user;", "user;"), // English word + semicolon
         ("user:", "user:"), // English word + colon
