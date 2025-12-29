@@ -119,6 +119,12 @@ class AppState: ObservableObject {
         }
     }
 
+    @Published var toastEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(toastEnabled, forKey: SettingsKey.toastEnabled)
+        }
+    }
+
     @Published var toggleShortcut: KeyboardShortcut {
         didSet {
             toggleShortcut.save()
@@ -149,6 +155,7 @@ class AppState: ObservableObject {
         englishAutoRestore = defaults.bool(forKey: SettingsKey.englishAutoRestore)
         autoCapitalize = defaults.bool(forKey: SettingsKey.autoCapitalize)
         soundEnabled = defaults.bool(forKey: SettingsKey.soundEnabled)
+        toastEnabled = defaults.bool(forKey: SettingsKey.toastEnabled)
 
         // Sync settings to Rust engine
         syncAllToEngine()
@@ -694,9 +701,11 @@ struct SettingsPageView: View {
             }
             .cardBackground()
 
-            // Sound, tone and ESC options
+            // Sound, toast, tone and ESC options
             VStack(spacing: 0) {
                 SettingsToggleRow("Âm thanh chuyển ngôn ngữ", isOn: $appState.soundEnabled)
+                Divider().padding(.leading, 12)
+                SettingsToggleRow("Hiện thông báo chuyển ngôn ngữ", isOn: $appState.toastEnabled)
                 Divider().padding(.leading, 12)
                 SettingsToggleRow("Đặt dấu kiểu mới (oà, uý)", isOn: $appState.modernTone)
                 Divider().padding(.leading, 12)

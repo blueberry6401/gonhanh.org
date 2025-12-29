@@ -188,6 +188,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
                 set: { [weak self] newValue in
                     self?.appState.isEnabled = newValue
                     SoundManager.shared.playToggleSound(enabled: newValue)
+                    ToastWindowController.shared.showToast(isVietnamese: newValue)
                 }
             ))
             .toggleStyle(.switch)
@@ -353,6 +354,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
     @objc private func handleToggleVietnamese() {
         appState.toggle()
         SoundManager.shared.playToggleSound(enabled: appState.isEnabled)
+        ToastWindowController.shared.showToast(isVietnamese: appState.isEnabled)
     }
 
     @objc private func handleInputSourceChanged() {

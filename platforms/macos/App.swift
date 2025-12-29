@@ -41,6 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             SettingsKey.englishAutoRestore: false,
             SettingsKey.autoCapitalize: false,
             SettingsKey.soundEnabled: false,
+            SettingsKey.toastEnabled: true,
         ])
     }
 }

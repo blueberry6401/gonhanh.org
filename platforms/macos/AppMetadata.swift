@@ -81,6 +81,7 @@ enum SettingsKey {
     static let autoCapitalize = "gonhanh.autoCapitalize"
     static let launchAtLoginUserDisabled = "gonhanh.launchAtLogin.userDisabled"
     static let soundEnabled = "gonhanh.soundEnabled"
+    static let toastEnabled = "gonhanh.toastEnabled"
 }
 
 // MARK: - Keyboard Shortcut Model
