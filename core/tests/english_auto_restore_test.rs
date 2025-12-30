@@ -102,7 +102,16 @@ fn pattern2_oo_vowel_pair() {
 
 #[test]
 fn pattern2_ee_vowel_pair() {
-    telex_auto_restore(&[("keep ", "keep ")]);
+    telex_auto_restore(&[
+        // With space - restore to English (invalid VN ending with -êp)
+        ("keep ", "keep "),
+        ("teep ", "teep "),
+        // Without space - keep Vietnamese transform (word not complete)
+        ("keep", "kêp"),  // k + e + e(circumflex) + p → kêp
+        ("keeps", "kếp"), // k + e + e + p + s(sắc) → kếp
+        ("teep", "têp"),  // t + e + e(circumflex) + p → têp
+        ("teepj", "tệp"), // t + e + e + p + j(nặng) → tệp
+    ]);
 }
 
 #[test]
@@ -143,7 +152,14 @@ fn pattern3_ai_with_p_initial() {
 
 #[test]
 fn pattern4_vowel_modifier_vowel() {
-    telex_auto_restore(&[("use ", "use "), ("user ", "user ")]);
+    telex_auto_restore(&[
+        ("use ", "use "),
+        ("user ", "user "),
+        ("users ", "users "),
+        // "ussers" → "users": "u+ss" at word start is very rare in English
+        // (no English words start with "uss"), so collapse double 's' to single
+        ("ussers ", "users "),
+    ]);
 }
 
 // =============================================================================
@@ -750,6 +766,13 @@ fn issue26_ua_with_hook_tone_before_vowel() {
         ("uar ", "ủa "), // u + a + r → ủa (standard order)
         ("uxa ", "ũa "), // u + x(ngã) + a → ũa
         ("uax ", "ũa "), // u + a + x → ũa (standard order)
+        // Similar pattern: a + r + o → ảo (valid Vietnamese)
+        ("aro ", "ảo "), // a + r(hỏi) + o → ảo (valid VN, NOT restored)
+        ("aor ", "ảo "), // a + o + r → ảo (standard order)
+        // Double 'r' reverts hỏi, then restore to raw
+        ("arro ", "aro "), // a + r + r(revert) + o → aro (restore to raw)
+        // Double 's' at start, more letters after - should collapse
+        ("ussers ", "users "), // u + s + s(revert) + e + r + s → users
     ]);
 }
 
@@ -803,5 +826,37 @@ fn vowel_triggered_circumflex_stays_vietnamese() {
         // Stop consonant finals (t, c, p) without mark → NOT real Vietnamese
         ("toto ", "toto "), // t+o+t+o → tôt (no mark, restore to English)
         ("papa ", "papa "), // p+a+p+a → pâp (no mark, restore to English)
+    ]);
+}
+
+// =============================================================================
+// ISSUE #151 - "mưa" (rain) should NOT be auto-restored
+// Vietnamese word with horn on 'u' pattern
+// =============================================================================
+
+#[test]
+fn issue151_mua_horn_not_restored() {
+    // "mưa" (rain) is a common Vietnamese word - should NOT be auto-restored
+    // Pattern: m + u + w(horn on u) + a → mưa
+    // Or: m + u + a + w(horn on u) → mưa
+    telex_auto_restore(&[
+        ("muwa ", "mưa "), // m + u + w + a → mưa (NOT "mwa")
+        ("muaw ", "mưa "), // m + u + a + w → mưa (NOT "mwa")
+        ("mwa ", "mưa "),  // Issue #151: shorthand m + w + a → mưa (NOT "mwa")
+        // Similar patterns with other initials
+        ("chuwa ", "chưa "), // chưa (not yet)
+        ("chuaw ", "chưa "), // chưa (alternative typing)
+        ("cwa ", "cưa "),    // Issue #151: shorthand c + w + a → cưa
+        ("thuwa ", "thưa "), // thưa (dear/sparse)
+        ("thuaw ", "thưa "), // thưa (alternative)
+        ("luwa ", "lưa "),   // lưa (somewhat valid pattern)
+        ("luaw ", "lưa "),   // lưa (alternative)
+        ("lwa ", "lưa "),    // Issue #151: shorthand l + w + a → lưa
+        // With marks (tones)
+        ("muwas ", "mứa "), // mứa (sắc)
+        ("muwaf ", "mừa "), // mừa (huyền)
+        ("muwar ", "mửa "), // mửa (hỏi) - vomit
+        ("muwax ", "mữa "), // mữa (ngã)
+        ("muwaj ", "mựa "), // mựa (nặng)
     ]);
 }
