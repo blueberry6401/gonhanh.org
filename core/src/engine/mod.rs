@@ -469,22 +469,47 @@ impl Engine {
             return Result::none();
         }
 
-        // When IME is disabled, only process break keys for shortcuts
-        // Skip Vietnamese processing (tones, marks, etc.) but allow shortcuts to work
+        // When IME is disabled, process shortcuts but skip Vietnamese transforms
+        // This allows both word shortcuts (btw → by the way) and symbol shortcuts (-> → →)
         if !self.enabled {
-            // Clear Vietnamese state but keep processing break keys for shortcuts
+            // Clear Vietnamese state
             self.buf.clear();
             self.raw_input.clear();
             self.word_history.clear();
             self.spaces_after_commit = 0;
 
-            // Only process break keys for shortcuts when disabled
+            // Word boundary keys (Space, Enter): check for word shortcuts
+            if key == keys::SPACE || key == keys::RETURN || key == keys::ENTER {
+                if !self.shortcut_prefix.is_empty() {
+                    let input_method = self.current_input_method();
+                    if let Some(m) = self.shortcuts.try_match_for_method(
+                        &self.shortcut_prefix,
+                        None,
+                        true, // is_word_boundary = true for word shortcuts
+                        input_method,
+                    ) {
+                        let output: Vec<char> = m.output.chars().collect();
+                        let backspace_count = m.backspace_count as u8;
+                        self.shortcut_prefix.clear();
+                        // For Space, include space in output; for Enter, don't
+                        if key == keys::SPACE {
+                            let mut output_with_space = output;
+                            output_with_space.push(' ');
+                            return Result::send(backspace_count, &output_with_space);
+                        } else {
+                            return Result::send(backspace_count, &output);
+                        }
+                    }
+                }
+                self.shortcut_prefix.clear();
+                return Result::none();
+            }
+
+            // Break keys (punctuation): check for immediate shortcuts like "->"
             if keys::is_break_ext(key, shift) {
-                // Accumulate break chars for potential shortcut matching
                 if let Some(ch) = break_key_to_char(key, shift) {
                     self.shortcut_prefix.push(ch);
 
-                    // Check for immediate shortcut match
                     let input_method = self.current_input_method();
                     if let Some(m) = self.shortcuts.try_match_for_method(
                         &self.shortcut_prefix,
@@ -492,18 +517,25 @@ impl Engine {
                         false,
                         input_method,
                     ) {
-                        // Found a match! Send the replacement
                         let output: Vec<char> = m.output.chars().collect();
                         let backspace_count = (m.backspace_count as u8).saturating_sub(1);
                         self.shortcut_prefix.clear();
                         return Result::send_consumed(backspace_count, &output);
                     }
-                    // No match yet, keep accumulating
                     return Result::none();
                 }
+                // Break key without char mapping (Tab, arrows, etc.) - clear and pass through
+                self.shortcut_prefix.clear();
+                return Result::none();
             }
 
-            // Non-break key: clear shortcut prefix and pass through
+            // Letter and number keys: accumulate for word shortcuts (e.g., "btw", "f1", "a1")
+            if let Some(ch) = utils::key_to_char(key, caps) {
+                self.shortcut_prefix.push(ch);
+                return Result::none();
+            }
+
+            // Unknown keys: clear shortcut prefix and pass through
             self.shortcut_prefix.clear();
             return Result::none();
         }
@@ -2274,6 +2306,13 @@ impl Engine {
                 return None;
             }
 
+            // Issue #162 fix: Don't reposition if vowels are identical (doubled vowels like "oo", "aa", "ee").
+            // These are NOT valid Vietnamese diphthongs and should keep mark on first vowel.
+            // This prevents VNI "o2o" from incorrectly producing "oò" instead of "òo".
+            if vowels.len() == 2 && vowels[0].key == vowels[1].key {
+                return None;
+            }
+
             let last_vowel_pos = vowels.last().map(|v| v.pos).unwrap_or(0);
             let has_final = self.has_final_consonant(last_vowel_pos);
             let has_qu = self.has_qu_initial();
@@ -2530,9 +2569,12 @@ impl Engine {
         }
 
         self.last_transform = None;
-        // Add letters to buffer, and numbers in VNI mode (for pass-through after revert)
+        // Add letters to buffer, and numbers in both Telex and VNI modes
         // This ensures buffer.len() stays in sync with screen chars for correct backspace count
-        if keys::is_letter(key) || (self.method == 1 && keys::is_number(key)) {
+        // Issue #162: Numbers must be added to buffer in Telex mode too, otherwise patterns
+        // like "o2o" have buffer = [O] (missing '2') causing the second 'o' to incorrectly
+        // trigger circumflex (thinking it's "oo" → "ô")
+        if keys::is_letter(key) || keys::is_number(key) {
             // Add the letter/number to buffer
             self.buf.push(Char::new(key, caps));
 
@@ -4030,11 +4072,12 @@ impl Engine {
                         && keys::is_consonant(self.raw_input[first_vowel_pos + 1].0);
                     if !has_initial_consonant && !has_consonant_between {
                         let first_vowel = self.raw_input[first_vowel_pos].0;
-                        // Vietnamese no-initial diphthongs:
+                        // Vietnamese no-initial patterns:
+                        // - Same vowel doubling: OFO → ồ, EFE → ề, AFA → ầ (circumflex + tone)
                         // - U + modifier + A: ủa, ùa, úa (interjections)
                         // - A + modifier + O: ảo, ào, áo (ảo giác, ảo tưởng)
-                        let is_vietnamese_no_initial = (first_vowel == keys::U
-                            && next_key == keys::A)
+                        let is_vietnamese_no_initial = first_vowel == next_key // Same vowel = Telex circumflex
+                            || (first_vowel == keys::U && next_key == keys::A)
                             || (first_vowel == keys::A && next_key == keys::O);
                         if !is_vietnamese_no_initial {
                             return true;
@@ -4077,7 +4120,11 @@ impl Engine {
                                     || next_key == keys::U
                             }
                             k if k == keys::O => next_key == keys::I || next_key == keys::A,
-                            k if k == keys::E => next_key == keys::O, // eo: đeo, kẹo, mèo
+                            k if k == keys::E => {
+                                // eo: đeo, kẹo, mèo
+                                // eu: nếu, kêu (êu diphthong with tone on ê)
+                                next_key == keys::O || next_key == keys::U
+                            }
                             k if k == keys::I => next_key == keys::U, // iu: chịu, nịu, lịu
                             _ => false,
                         };

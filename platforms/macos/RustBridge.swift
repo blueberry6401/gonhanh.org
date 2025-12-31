@@ -6,29 +6,34 @@ import AppKit
 
 /// Debug logging - only active when /tmp/gonhanh_debug.log exists
 /// Enable: touch /tmp/gonhanh_debug.log | Disable: rm /tmp/gonhanh_debug.log
+/// PERFORMANCE: isEnabled cached, @autoclosure defers string formatting until needed
 private enum Log {
     private static let logPath = "/tmp/gonhanh_debug.log"
-    private static var isEnabled: Bool { FileManager.default.fileExists(atPath: logPath) }
+    private static var _enabled: Bool?
+    static var isEnabled: Bool {
+        if let cached = _enabled { return cached }
+        _enabled = FileManager.default.fileExists(atPath: logPath)
+        return _enabled!
+    }
 
-    private static func write(_ msg: String) {
+    /// Call to refresh enabled state (e.g., on app activation)
+    static func refresh() { _enabled = nil }
+
+    private static func write(_ msg: @autoclosure () -> String) {
         guard isEnabled, let handle = FileHandle(forWritingAtPath: logPath) else { return }
-        let ts = String(format: "%02d:%02d:%02d.%03d",
-                        Calendar.current.component(.hour, from: Date()),
-                        Calendar.current.component(.minute, from: Date()),
-                        Calendar.current.component(.second, from: Date()),
-                        Calendar.current.component(.nanosecond, from: Date()) / 1_000_000)
+        let now = CFAbsoluteTimeGetCurrent()
+        let secs = Int(now) % 86400
+        let ms = Int((now - floor(now)) * 1000)
+        let ts = String(format: "%02d:%02d:%02d.%03d", secs / 3600, (secs / 60) % 60, secs % 60, ms)
         handle.seekToEndOfFile()
-        handle.write("[\(ts)] \(msg)\n".data(using: .utf8)!)
+        handle.write("[\(ts)] \(msg())\n".data(using: .utf8)!)
         handle.closeFile()
     }
 
-    static func key(_ code: UInt16, _ result: String) { write("K:\(code) → \(result)") }
-    static func transform(_ bs: Int, _ chars: String) { write("T: ←\(bs) \"\(chars)\"") }
-    static func send(_ method: String, _ bs: Int, _ chars: String) { write("S:\(method) ←\(bs) \"\(chars)\"") }
-    static func method(_ name: String) { write("M: \(name)") }
-    static func info(_ msg: String) { write("I: \(msg)") }
-    static func skip() { write("K: skip (self)") }
-    static func queue(_ msg: String) { write("Q: \(msg)") }
+    static func key(_ code: UInt16, _ result: @autoclosure () -> String) { guard isEnabled else { return }; write("K:\(code) → \(result())") }
+    static func method(_ name: @autoclosure () -> String) { guard isEnabled else { return }; write("M: \(name())") }
+    static func info(_ msg: @autoclosure () -> String) { guard isEnabled else { return }; write("I: \(msg())") }
+    static func queue(_ msg: @autoclosure () -> String) { guard isEnabled else { return }; write("Q: \(msg())") }
 }
 
 // MARK: - Constants
@@ -158,6 +163,14 @@ private class TextInjector {
         usleep(5000)  // Settle time
     }
 
+    /// Post break key (Enter, punctuation) synthetically after text injection
+    /// Used for auto-restore to ensure correct event ordering
+    func postBreakKey(keyCode: CGKeyCode, shift: Bool) {
+        guard let src = CGEventSource(stateID: .privateState) else { return }
+        let flags: CGEventFlags = shift ? .maskShift : []
+        postKey(keyCode, source: src, flags: flags)
+    }
+
     /// Inject text replacement synchronously (blocks until complete)
     func injectSync(bs: Int, text: String, method: InjectionMethod, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
         semaphore.wait()
@@ -201,7 +214,6 @@ private class TextInjector {
         if bs > 0 { usleep(delays.1) }
 
         postText(text, source: src, delay: delays.2)
-        Log.send("bs", bs, text)
     }
 
     /// Selection injection: Shift+Left to select, then type replacement (for browser address bars)
@@ -234,7 +246,6 @@ private class TextInjector {
         }
 
         postText(text, source: src, delay: textDelay)
-        Log.send("sel", bs, text)
     }
 
     /// Autocomplete injection: Forward Delete to clear suggestion, then backspace + text via proxy
@@ -255,7 +266,6 @@ private class TextInjector {
 
         // Type replacement text
         postText(text, source: src, proxy: proxy)
-        Log.send("auto", bs, text)
     }
 
     /// Select All injection: Select all text then type full session buffer
@@ -277,7 +287,6 @@ private class TextInjector {
 
         // Type full session buffer (replaces all selected text)
         postText(fullText, source: src, proxy: proxy)
-        Log.send("selAll", 0, fullText)
     }
 
     /// AX API injection: Directly manipulate text field via Accessibility API
@@ -342,7 +351,6 @@ private class TextInjector {
             AXUIElementSetAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, newRange)
         }
 
-        Log.send("ax", bs, text)
         return true
     }
 
@@ -862,9 +870,9 @@ private func keyboardCallback(
         return Unmanaged.passUnretained(event)
     }
 
-    // Check for special panel apps (Spotlight, Raycast) on keyboard events
-    // These apps don't trigger NSWorkspaceDidActivateApplicationNotification
-    if type == .keyDown || type == .keyUp {
+    // Check for special panel apps (Spotlight, Raycast) on keyDown only
+    // Skip if per-app mode disabled (fast check before async dispatch)
+    if type == .keyDown && AppState.shared.perAppModeEnabled {
         DispatchQueue.main.async {
             PerAppModeManager.shared.checkSpecialPanelApp()
         }
@@ -932,7 +940,6 @@ private func keyboardCallback(
     wasModifierShortcutPressed = false
 
     if event.getIntegerValueField(.eventSourceUserData) == kEventMarker {
-        Log.skip()
         return Unmanaged.passUnretained(event)
     }
 
@@ -952,9 +959,21 @@ private func keyboardCallback(
     // Enter: submit and trigger auto-capitalize pending state
     // IMPORTANT: Send Enter to engine FIRST to trigger auto-capitalize pending state,
     // then clear buffer. Engine sets pending_capitalize when it sees Enter key.
+    // Also handle auto-restore and shortcut results (same as ESC handling)
     if keyCode == 0x24 || keyCode == 0x4C {  // Return (0x24) or Enter/Numpad (0x4C)
-        // Let engine see Enter to set pending_capitalize for next word
-        _ = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift)
+        let (method, delays) = detectMethod()
+
+        if let (bs, chars, keyConsumed) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
+            sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
+
+            if bs > 0 || !chars.isEmpty {
+                TextInjector.shared.clearSessionBuffer()
+                // Shortcut: consumed, don't post. Auto-restore: post Enter after replacement
+                if !keyConsumed { TextInjector.shared.postBreakKey(keyCode: keyCode, shift: shift) }
+                return nil
+            }
+        }
+
         TextInjector.shared.clearSessionBuffer()
         return Unmanaged.passUnretained(event)
     }
@@ -981,7 +1000,6 @@ private func keyboardCallback(
     // iPhone Mirroring and other passthrough apps: pass all keys directly
     // These apps handle text input remotely and cannot receive macOS text injection
     if method == .passthrough {
-        Log.key(keyCode, "pass")
         return Unmanaged.passUnretained(event)
     }
 
@@ -1059,8 +1077,6 @@ private func keyboardCallback(
 
         // First try Rust engine (handles immediate backspace-after-space)
         if let (bs, chars, _) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
-            let str = String(chars)
-            Log.transform(bs, str)
             sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
             return nil
         }
@@ -1086,14 +1102,16 @@ private func keyboardCallback(
     }
 
     if let (bs, chars, keyConsumed) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
-        Log.transform(bs, String(chars))
         sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
 
-        // Pass through break keys (punctuation) for auto-restore, except:
-        // - Space: already handled by engine
-        // - Consumed keys: used by shortcuts (e.g., ">" in "->")
-        let shouldPassThrough = isBreakKey(keyCode, shift: shift) && keyCode != KeyCode.space && !keyConsumed
-        return shouldPassThrough ? Unmanaged.passUnretained(event) : nil
+        // Break keys (punctuation, not space): pass through or post synthetically
+        let isBreak = isBreakKey(keyCode, shift: shift) && keyCode != KeyCode.space && !keyConsumed
+        if isBreak {
+            // Auto-restore: post break key after replacement for correct ordering
+            if bs > 0 && !chars.isEmpty { TextInjector.shared.postBreakKey(keyCode: keyCode, shift: shift) }
+            else { return Unmanaged.passUnretained(event) }
+        }
+        return nil
     }
 
     // For selectAll method: handle pass-through keys (space, punctuation, etc.)
@@ -1107,11 +1125,6 @@ private func keyboardCallback(
         }
     }
 
-    // Debug: log frontmost app for all keystrokes
-    if let app = NSWorkspace.shared.frontmostApplication {
-        Log.info("frontmost: \(app.bundleIdentifier ?? "nil")")
-    }
-    Log.key(keyCode, "pass")
     return Unmanaged.passUnretained(event)
 }
 
@@ -1178,8 +1191,43 @@ private func keyCodeToChar(keyCode: UInt16, shift: Bool) -> Character? {
 
 // MARK: - Text Replacement
 
+// MARK: - Detection Cache
+
+/// Cache for detectMethod() - avoids expensive AX queries on every keystroke
+/// Uses time-based TTL (200ms) + app switch invalidation for safety
+/// PERFORMANCE: Uses CFAbsoluteTimeGetCurrent() instead of Date() for faster timestamp
+private enum DetectionCache {
+    static var result: (method: InjectionMethod, delays: (UInt32, UInt32, UInt32))?
+    static var timestamp: CFAbsoluteTime = 0
+    static let ttl: CFAbsoluteTime = 0.2  // 200ms
+
+    static func get() -> (InjectionMethod, (UInt32, UInt32, UInt32))? {
+        guard let cached = result,
+              CFAbsoluteTimeGetCurrent() - timestamp < ttl else { return nil }
+        return (cached.method, cached.delays)
+    }
+
+    static func set(_ method: InjectionMethod, _ delays: (UInt32, UInt32, UInt32)) {
+        result = (method, delays)
+        timestamp = CFAbsoluteTimeGetCurrent()
+    }
+
+    static func clear() {
+        result = nil
+        timestamp = 0
+    }
+}
+
+/// Clear detection cache (call on app switch)
+func clearDetectionCache() {
+    DetectionCache.clear()
+}
+
 private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
-    // Get focused element and its owning app (works for overlays like Spotlight)
+    // Fast path: return cached result if valid
+    if let cached = DetectionCache.get() { return cached }
+
+    // Slow path: query AX for focused element
     let systemWide = AXUIElementCreateSystemWide()
     var focused: CFTypeRef?
     var role: String?
@@ -1210,53 +1258,42 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
 
     guard let bundleId = bundleId else { return (.fast, (200, 800, 500)) }
 
-    // Debug: log bundle and role for investigation
     Log.info("detect: \(bundleId) role=\(role ?? "nil")")
 
+    // Helper to cache and return result
+    func cached(_ m: InjectionMethod, _ d: (UInt32, UInt32, UInt32)) -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
+        DetectionCache.set(m, d); return (m, d)
+    }
+
     // iPhone Mirroring (ScreenContinuity) - pass through all keys
-    // The remote iOS device handles its own text input, macOS cannot inject text
     if bundleId == "com.apple.ScreenContinuity" {
-        Log.method("pass:iphone")
-        return (.passthrough, (0, 0, 0))
+        Log.method("pass:iphone"); return cached(.passthrough, (0, 0, 0))
     }
 
-    // Selection method for autocomplete UI elements (ComboBox, SearchField)
-    if role == "AXComboBox" { Log.method("sel:combo"); return (.selection, (0, 0, 0)) }
-    if role == "AXSearchField" { Log.method("sel:search"); return (.selection, (0, 0, 0)) }
+    // Selection method for autocomplete UI elements
+    if role == "AXComboBox" { Log.method("sel:combo"); return cached(.selection, (0, 0, 0)) }
+    if role == "AXSearchField" { Log.method("sel:search"); return cached(.selection, (0, 0, 0)) }
 
-    // Spotlight - use AX API direct manipulation (works on macOS 13+)
-    // This bypasses Spotlight's autocomplete behavior by directly setting text field value
-    // Note: Spotlight can run under com.apple.systemuiserver in some cases
+    // Spotlight - use AX API direct manipulation (macOS 13+)
     if bundleId == "com.apple.Spotlight" || bundleId == "com.apple.systemuiserver" {
-        Log.method("ax:spotlight")
-        return (.axDirect, (0, 0, 0))
+        Log.method("ax:spotlight"); return cached(.axDirect, (0, 0, 0))
     }
 
-    // Arc/Dia browser - use AX API for address bar (same approach as Spotlight)
-    // The Browser Company apps have good accessibility support
-    // Dia uses AXTextArea for input fields, Arc uses AXTextField
+    // Arc/Dia browser - use AX API for address bar
     let theBrowserCompany = ["company.thebrowser.Browser", "company.thebrowser.Arc", "company.thebrowser.dia"]
     if theBrowserCompany.contains(bundleId) && (role == "AXTextField" || role == "AXTextArea") {
-        Log.method("ax:arc")
-        return (.axDirect, (0, 0, 0))
+        Log.method("ax:arc"); return cached(.axDirect, (0, 0, 0))
     }
 
     // Firefox-based browsers - use AX API
-    // Firefox returns AXWindow for focused element, but axDirect still works
     let firefoxBrowsers = [
-        "org.mozilla.firefox",                      // Firefox
-        "org.mozilla.firefoxdeveloperedition",      // Firefox Developer
-        "org.mozilla.nightly",                      // Firefox Nightly
-        "org.waterfoxproject.waterfox",             // Waterfox
-        "io.gitlab.librewolf-community.librewolf", // LibreWolf
-        "one.ablaze.floorp",                        // Floorp
-        "org.torproject.torbrowser",                // Tor Browser
-        "net.mullvad.mullvadbrowser",               // Mullvad Browser
-        "app.zen-browser.zen"                       // Zen Browser (Firefox-based)
+        "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly",
+        "org.waterfoxproject.waterfox", "io.gitlab.librewolf-community.librewolf",
+        "one.ablaze.floorp", "org.torproject.torbrowser", "net.mullvad.mullvadbrowser",
+        "app.zen-browser.zen"
     ]
     if firefoxBrowsers.contains(bundleId) && (role == "AXTextField" || role == "AXWindow") {
-        Log.method("ax:firefox")
-        return (.axDirect, (0, 0, 0))
+        Log.method("ax:firefox"); return cached(.axDirect, (0, 0, 0))
     }
 
     // Browser address bars (AXTextField with autocomplete)
@@ -1295,41 +1332,34 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         "ai.perplexity.comet",           // Comet (Perplexity AI)
         "com.duckduckgo.macos.browser"   // DuckDuckGo
     ]
-    if browsers.contains(bundleId) && role == "AXTextField" { Log.method("sel:browser"); return (.selection, (0, 0, 0)) }
-    if role == "AXTextField" && bundleId.hasPrefix("com.jetbrains") { Log.method("sel:jb"); return (.selection, (0, 0, 0)) }
+    if browsers.contains(bundleId) && role == "AXTextField" { Log.method("sel:browser"); return cached(.selection, (0, 0, 0)) }
+    if role == "AXTextField" && bundleId.hasPrefix("com.jetbrains") { Log.method("sel:jb"); return cached(.selection, (0, 0, 0)) }
 
-    // Microsoft Office apps - use backspace method instead of selection
-    // Selection method conflicts with Office's autocomplete/suggestion features
-    // which can cause the first character to be lost (issue #36)
-    if bundleId == "com.microsoft.Excel" { Log.method("slow:excel"); return (.slow, (3000, 8000, 3000)) }
-    if bundleId == "com.microsoft.Word" { Log.method("slow:word"); return (.slow, (3000, 8000, 3000)) }
+    // Microsoft Office apps - backspace method (selection conflicts with autocomplete)
+    if bundleId == "com.microsoft.Excel" { Log.method("slow:excel"); return cached(.slow, (3000, 8000, 3000)) }
+    if bundleId == "com.microsoft.Word" { Log.method("slow:word"); return cached(.slow, (3000, 8000, 3000)) }
 
-    // Electron apps - higher delays for reliable text replacement
-    // Notion code blocks need extra time for Monaco editor input processing (issue #132)
-    if bundleId == "com.todesktop.230313mzl4w4u92" { Log.method("slow:claude"); return (.slow, (8000, 15000, 8000)) }
-    if bundleId == "notion.id" { Log.method("slow:notion"); return (.slow, (12000, 25000, 12000)) }
+    // Electron apps - higher delays for Monaco editor
+    if bundleId == "com.todesktop.230313mzl4w4u92" { Log.method("slow:claude"); return cached(.slow, (8000, 15000, 8000)) }
+    if bundleId == "notion.id" { Log.method("slow:notion"); return cached(.slow, (12000, 25000, 12000)) }
 
-    // Warp terminal - higher delays (modern terminal with complex input processing)
-    if bundleId == "dev.warp.Warp-Stable" { Log.method("slow:warp"); return (.slow, (8000, 15000, 8000)) }
+    // Warp terminal - higher delays
+    if bundleId == "dev.warp.Warp-Stable" { Log.method("slow:warp"); return cached(.slow, (8000, 15000, 8000)) }
 
-    // Terminal/IDE apps - conservative delays for reliability
+    // Terminal/IDE apps - conservative delays
     let terminals = [
-        // Terminals
         "com.apple.Terminal", "com.googlecode.iterm2", "io.alacritty",
-        "com.github.wez.wezterm", "com.mitchellh.ghostty",
-        "net.kovidgoyal.kitty", "co.zeit.hyper", "org.tabby", "com.raphaelamorim.rio",
-        "com.termius-dmg.mac",
-        // IDEs/Editors
+        "com.github.wez.wezterm", "com.mitchellh.ghostty", "net.kovidgoyal.kitty",
+        "co.zeit.hyper", "org.tabby", "com.raphaelamorim.rio", "com.termius-dmg.mac",
         "com.microsoft.VSCode", "com.google.antigravity", "dev.zed.Zed",
         "com.sublimetext.4", "com.sublimetext.3", "com.panic.Nova"
     ]
-    if terminals.contains(bundleId) { Log.method("slow:term"); return (.slow, (3000, 8000, 3000)) }
-    // JetBrains IDEs (IntelliJ, PyCharm, WebStorm, GoLand, Fleet, etc.)
-    if bundleId.hasPrefix("com.jetbrains") { Log.method("slow:jb"); return (.slow, (3000, 8000, 3000)) }
+    if terminals.contains(bundleId) { Log.method("slow:term"); return cached(.slow, (3000, 8000, 3000)) }
+    if bundleId.hasPrefix("com.jetbrains") { Log.method("slow:jb"); return cached(.slow, (3000, 8000, 3000)) }
 
-    // Default: safe delays for stability across unknown apps
+    // Default: safe delays
     Log.method("default")
-    return (.fast, (1000, 3000, 1500))
+    return cached(.fast, (1000, 3000, 1500))
 }
 
 private func sendReplacement(backspace bs: Int, chars: [Character], method: InjectionMethod, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
@@ -1346,7 +1376,6 @@ class PerAppModeManager {
 
     private var currentBundleId: String?
     private var observer: NSObjectProtocol?
-    private var mouseClickMonitor: Any?
 
     private init() {}
 
@@ -1361,17 +1390,15 @@ class PerAppModeManager {
         ) { [weak self] notification in
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   let bundleId = app.bundleIdentifier else { return }
-            // Update SpecialPanelAppDetector's last frontmost app
             SpecialPanelAppDetector.updateLastFrontMostApp(bundleId)
+            SpecialPanelAppDetector.invalidateCache()
             self?.handleAppSwitch(bundleId)
         }
-        
-        // Monitor mouse clicks to detect special panel apps (Spotlight, Raycast)
-        // These apps don't trigger NSWorkspaceDidActivateApplicationNotification
-        mouseClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.checkSpecialPanelApp()
-        }
-        
+
+        // NOTE: Removed mouse click monitor for checkSpecialPanelApp() - it was causing
+        // system-wide lag because CGWindowListCopyWindowInfo + AX queries run on EVERY click.
+        // Keyboard-based detection (in keyboardCallback) is sufficient for Spotlight/Raycast.
+
         Log.info("PerAppModeManager started")
     }
 
@@ -1380,10 +1407,6 @@ class PerAppModeManager {
         if let observer = observer {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             self.observer = nil
-        }
-        if let monitor = mouseClickMonitor {
-            NSEvent.removeMonitor(monitor)
-            mouseClickMonitor = nil
         }
     }
 
@@ -1405,6 +1428,7 @@ class PerAppModeManager {
 
         RustBridge.clearBuffer()
         TextInjector.shared.clearSessionBuffer()
+        clearDetectionCache()  // Clear injection method cache on app switch
 
         guard AppState.shared.perAppModeEnabled else { return }
 

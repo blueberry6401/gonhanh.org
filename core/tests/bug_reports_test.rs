@@ -2,7 +2,7 @@
 //! These tests document expected behavior from user bug reports.
 
 mod common;
-use common::telex;
+use common::{telex, telex_auto_restore, vni};
 use gonhanh_core::engine::Engine;
 use gonhanh_core::utils::type_word;
 
@@ -676,4 +676,193 @@ fn issue146_tom_s_should_produce_tom_sac() {
         ("doms", "dóm"), // Similar pattern
         ("noms", "nóm"), // Similar pattern
     ]);
+}
+
+// =============================================================================
+// BUG: "nesue " → "nếu " (delayed circumflex with tone before vowel)
+// In Telex: n=initial, e=vowel, s=sắc on 'e', u=vowel, e=circumflex on first 'e'
+// Pattern: typing 's' (sắc) then 'ue' should form "nếu" (if) not "néue"
+// =============================================================================
+
+#[test]
+fn bug_nesue_to_neu_circumflex() {
+    use gonhanh_core::engine::Action;
+    use gonhanh_core::utils::telex_auto_restore;
+
+    // Debug: step by step
+    let mut e = Engine::new();
+    e.set_english_auto_restore(true);
+
+    let mut screen = String::new();
+    let inputs = ['n', 'e', 's', 'u', 'e', ' '];
+
+    for c in inputs {
+        let key = gonhanh_core::utils::char_to_key(c);
+        let r = e.on_key(key, false, false);
+
+        if r.action == Action::Send as u8 {
+            for _ in 0..r.backspace {
+                screen.pop();
+            }
+            for i in 0..r.count as usize {
+                if let Some(ch) = char::from_u32(r.chars[i]) {
+                    screen.push(ch);
+                }
+            }
+            println!(
+                "Key '{}': backspace={}, output='{}', screen='{}'",
+                c,
+                r.backspace,
+                (0..r.count as usize)
+                    .filter_map(|i| char::from_u32(r.chars[i]))
+                    .collect::<String>(),
+                screen
+            );
+        } else {
+            screen.push(c);
+            println!("Key '{}': passthrough, screen='{}'", c, screen);
+        }
+    }
+
+    println!("\nFinal: 'nesue ' -> '{}' (expected: 'nếu ')", screen);
+
+    // Now test with telex_auto_restore helper
+    telex_auto_restore(&[("nesue ", "nếu ")]);
+}
+
+#[test]
+fn test_neus_tone_position() {
+    use gonhanh_core::engine::Action;
+
+    let mut e = Engine::new();
+    let mut screen = String::new();
+    let inputs = ['n', 'e', 'u', 's'];
+
+    for c in inputs {
+        let key = gonhanh_core::utils::char_to_key(c);
+        let r = e.on_key(key, false, false);
+
+        if r.action == Action::Send as u8 {
+            for _ in 0..r.backspace {
+                screen.pop();
+            }
+            for i in 0..r.count as usize {
+                if let Some(ch) = char::from_u32(r.chars[i]) {
+                    screen.push(ch);
+                }
+            }
+            println!(
+                "Key '{}': backspace={}, output='{}', screen='{}'",
+                c,
+                r.backspace,
+                (0..r.count as usize)
+                    .filter_map(|i| char::from_u32(r.chars[i]))
+                    .collect::<String>(),
+                screen
+            );
+        } else {
+            screen.push(c);
+            println!("Key '{}': passthrough, screen='{}'", c, screen);
+        }
+    }
+
+    println!("\nFinal: 'neus' -> '{}' (expected: 'néu')", screen);
+    assert_eq!(screen, "néu", "'neus' should produce 'néu' (tone on e)");
+}
+
+// =============================================================================
+// ISSUE #162: "o2o" → "oô", expected "o2o"
+// In Telex mode, numbers should NOT trigger VNI modifiers.
+// VNI mode: 2 = huyền mark, 6 = circumflex
+// Telex mode: 2 should be just a regular character
+// =============================================================================
+
+#[test]
+fn issue162_o2o_should_not_transform_in_telex() {
+    // Telex mode is default (method = 0)
+    let mut e = Engine::new();
+    let result = type_word(&mut e, "o2o");
+    println!("'o2o' -> '{}' (expected: 'o2o')", result);
+    assert_eq!(
+        result, "o2o",
+        "'o2o' in Telex mode should stay as 'o2o', not 'oô'"
+    );
+
+    // Additional test cases with numbers in Telex mode
+    telex_auto_restore(&[
+        ("o2o", "o2o"),       // Issue #162
+        ("a2a", "a2a"),       // Similar pattern
+        ("e2e", "e2e"),       // Similar pattern
+        ("o6o", "o6o"),       // '6' should also not trigger circumflex in Telex
+        ("a1a", "a1a"),       // '1' should not trigger sắc in Telex
+        ("123", "123"),       // Pure numbers should pass through
+        ("a1b2c3", "a1b2c3"), // Mixed alphanumeric
+    ]);
+
+    // VNI mode: numbers ARE modifiers
+    // "o2o" should produce "òo" (2=huyền mark, then 'o' added after)
+    vni(&[
+        ("o2o", "òo"), // Issue #162 - VNI mode: huyền on first o, then second o
+        ("a2a", "àa"), // Similar pattern
+        ("e2e", "èe"), // Similar pattern
+        ("o6o", "ôo"), // 6 = circumflex on first o, then second o
+        ("a1a", "áa"), // 1 = sắc on first a, then second a
+    ]);
+}
+
+// Debug test for VNI o2o
+#[test]
+fn debug_vni_o2o() {
+    use gonhanh_core::data::keys;
+
+    let mut e = Engine::new();
+    e.set_method(1); // VNI
+
+    // Step-by-step debugging
+    println!("\n=== VNI o2o Debug ===");
+
+    // Step 1: Type 'o'
+    let r1 = e.on_key(keys::O, false, false);
+    println!(
+        "After 'o': action={}, backspace={}, count={}",
+        r1.action, r1.backspace, r1.count
+    );
+
+    // Step 2: Type '2' (huyền mark)
+    let r2 = e.on_key(keys::N2, false, false);
+    println!(
+        "After '2': action={}, backspace={}, count={}, chars={:?}",
+        r2.action,
+        r2.backspace,
+        r2.count,
+        (0..r2.count as usize)
+            .filter_map(|i| char::from_u32(r2.chars[i]))
+            .collect::<Vec<_>>()
+    );
+
+    // Step 3: Type 'o'
+    let r3 = e.on_key(keys::O, false, false);
+    println!(
+        "After 2nd 'o': action={}, backspace={}, count={}, chars={:?}",
+        r3.action,
+        r3.backspace,
+        r3.count,
+        (0..r3.count as usize)
+            .filter_map(|i| char::from_u32(r3.chars[i]))
+            .collect::<Vec<_>>()
+    );
+
+    // Test type_word result
+    e.clear();
+    let result = type_word(&mut e, "o2o");
+    println!("type_word('o2o') = '{}' (expected: 'òo')", result);
+
+    // FIXED: VNI "o2o" now correctly produces "òo"
+    // The issue was in reposition_tone_if_needed() - it was incorrectly moving the
+    // mark from position 0 to position 1 because "oo" is not in TONE_FIRST_PATTERNS
+    // or TONE_SECOND_PATTERNS, so find_tone_position returned position 1 by default.
+    //
+    // The fix adds a check to skip repositioning for identical doubled vowels
+    // like "oo", "aa", "ee" which are NOT valid Vietnamese diphthongs.
+    assert_eq!(result, "òo", "VNI 'o2o' should produce 'òo'");
 }

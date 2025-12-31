@@ -860,3 +860,61 @@ fn issue151_mua_horn_not_restored() {
         ("muwaj ", "mựa "), // mựa (nặng)
     ]);
 }
+
+// =============================================================================
+// Vietnamese "êu" diphthong patterns - should NOT be auto-restored
+// Pattern: E + tone modifier + U + E → delayed circumflex creates êu
+// =============================================================================
+
+#[test]
+fn vietnamese_eu_diphthong_not_restored() {
+    // "nếu" (if), "kêu" (to call), "nêu" (to state) are valid Vietnamese words
+    // Pattern: consonant + e + tone + u + e → delayed circumflex on e → êu diphthong
+    telex_auto_restore(&[
+        // nếu (if) - common Vietnamese word
+        ("nesue ", "nếu "), // n + e + s(sắc) + u + e → nếu
+        ("neeus ", "nếu "), // n + e + e(circumflex) + u + s(sắc) → nếu (standard)
+        // kêu (to call/cry)
+        ("kesue ", "kếu "), // k + e + s + u + e → kếu
+        ("keeu ", "kêu "),  // k + e + e + u → kêu (no tone)
+        // Similar patterns with valid Vietnamese initials
+        ("lesue ", "lếu "), // l + e + s + u + e → lếu
+        ("tesue ", "tếu "), // t + e + s + u + e → tếu
+        ("mesue ", "mếu "), // m + e + s + u + e → mếu
+    ]);
+}
+
+// =============================================================================
+// Vietnamese standalone vowels with circumflex + tone - should NOT be auto-restored
+// Pattern: V + tone_modifier + V (same vowel) → circumflex + tone on single vowel
+// Example: OFO → ồ (o with circumflex + huyền)
+// =============================================================================
+
+#[test]
+fn standalone_vowel_circumflex_with_tone() {
+    // When typing V + modifier + same_V, the circumflex is applied to create
+    // a single vowel with both circumflex (from doubling) and tone (from modifier).
+    // These are valid Vietnamese exclamations/interjections and should NOT be restored.
+    telex_auto_restore(&[
+        // Circumflex vowels with huyền (f)
+        ("ofo ", "ồ "), // ồ - exclamation "oh" (surprised)
+        ("efe ", "ề "), // ề - (less common standalone)
+        ("afa ", "ầ "), // ầ - exclamation sound
+        // Circumflex vowels with sắc (s)
+        ("oso ", "ố "), // ố - exclamation
+        ("ese ", "ế "), // ế - (contextual)
+        ("asa ", "ấ "), // ấ - exclamation
+        // Circumflex vowels with hỏi (r)
+        ("oro ", "ổ "), // ổ - (contextual)
+        ("ere ", "ể "), // ể - (contextual)
+        ("ara ", "ẩ "), // ẩ - (contextual)
+        // Circumflex vowels with ngã (x)
+        ("oxo ", "ỗ "), // ỗ - (contextual)
+        ("exe ", "ễ "), // ễ - (contextual)
+        ("axa ", "ẫ "), // ẫ - (contextual)
+        // Circumflex vowels with nặng (j)
+        ("ojo ", "ộ "), // ộ - (contextual)
+        ("eje ", "ệ "), // ệ - (contextual)
+        ("aja ", "ậ "), // ậ - (contextual)
+    ]);
+}
