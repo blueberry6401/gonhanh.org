@@ -1,0 +1,15 @@
+{
+  "id": "session-1766980925288",
+  "projectId": "005e2e43-6505-43f7-896d-562398111a8c",
+  "title": "branch hiện tại (my-branch-2) có những update gì v...",
+  "messages": [
+    {
+      "id": "msg-1766980926518",
+      "role": "user",
+      "content": "branch hiện tại (my-branch-2) có những update gì về mặt tính năng so với nhánh main",
+      "timestamp": "2025-12-29T04:02:06.518Z"
+    }
+  ],
+  "createdAt": "2025-12-29T04:02:05.288Z",
+  "updatedAt": "2025-12-29T04:02:06.518Z"
+}

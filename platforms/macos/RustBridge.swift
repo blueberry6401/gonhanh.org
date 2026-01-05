@@ -329,14 +329,29 @@ private class TextInjector {
 
         // Handle autocomplete: when selection > 0, text after cursor is autocomplete suggestion
         // Example: "a|rc://chrome-urls" where "|" is cursor, "rc://..." is selected suggestion
-        let userText = (selection > 0 && cursor <= fullText.count)
-            ? String(fullText.prefix(cursor))
-            : fullText
+        // NOTE: AX API returns UTF-16 offsets, so we must use utf16 view for all position calculations
+        let utf16View = fullText.utf16
+        let cursorUTF16 = min(cursor, utf16View.count)
+
+        let userText: String
+        if selection > 0 && cursorUTF16 <= utf16View.count {
+            let endIdx = utf16View.index(utf16View.startIndex, offsetBy: cursorUTF16)
+            userText = String(fullText[..<endIdx])
+        } else {
+            userText = fullText
+        }
 
         // Calculate replacement: delete `bs` chars before cursor, insert `text`
-        let deleteStart = max(0, cursor - bs)
-        let prefix = String(userText.prefix(deleteStart))
-        let suffix = String(userText.dropFirst(cursor))
+        // IMPORTANT: cursor and bs are UTF-16 offsets, not grapheme cluster counts
+        let userUTF16 = userText.utf16
+        let deleteStartUTF16 = max(0, cursorUTF16 - bs)
+
+        // Convert UTF-16 offsets to String.Index
+        let prefixEndIdx = userUTF16.index(userUTF16.startIndex, offsetBy: min(deleteStartUTF16, userUTF16.count))
+        let suffixStartIdx = userUTF16.index(userUTF16.startIndex, offsetBy: min(cursorUTF16, userUTF16.count))
+
+        let prefix = String(userText[..<prefixEndIdx])
+        let suffix = String(userText[suffixStartIdx...])
         let newText = (prefix + text + suffix).precomposedStringWithCanonicalMapping
 
         // Write new value
@@ -345,8 +360,8 @@ private class TextInjector {
             return false
         }
 
-        // Update cursor to end of inserted text
-        var newCursor = CFRange(location: deleteStart + text.count, length: 0)
+        // Update cursor to end of inserted text (use UTF-16 offset)
+        var newCursor = CFRange(location: deleteStartUTF16 + text.utf16.count, length: 0)
         if let newRange = AXValueCreate(.cfRange, &newCursor) {
             AXUIElementSetAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, newRange)
         }
@@ -423,19 +438,44 @@ private class TextInjector {
 // MARK: - FFI (Rust Bridge)
 
 /// FFI result struct - must match Rust `Result` struct layout exactly
-/// Size: 64 UInt32 chars (256 bytes) + 4 bytes = 260 bytes
-/// Max replacement: 63 UTF-32 codepoints (Vietnamese diacritics = 1 each)
+/// Size: 256 UInt32 chars (1024 bytes) + 4 bytes = 1028 bytes
+/// Max replacement: 255 UTF-32 codepoints (Vietnamese diacritics = 1 each)
 private struct ImeResult {
-    // 64 UInt32 values for UTF-32 codepoints (matches core/src/engine/buffer.rs MAX)
+    // 256 UInt32 values for UTF-32 codepoints (matches core/src/engine/buffer.rs MAX)
+    // 32 lines × 8 values = 256 total
     var chars: (
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 1
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 2
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 3
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 4
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 5
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 6
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 7
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 8
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 9
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 10
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 11
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 12
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 13
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 14
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 15
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 16
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 17
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 18
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 19
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 20
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 21
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 22
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 23
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 24
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 25
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 26
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 27
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 28
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 29
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 30
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,  // 31
+        UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32   // 32
     )
     var action: UInt8
     var backspace: UInt8
@@ -450,6 +490,7 @@ private let FLAG_KEY_CONSUMED: UInt8 = 0x01  // Key was consumed by shortcut, do
 @_silgen_name("ime_method") private func ime_method(_ method: UInt8)
 @_silgen_name("ime_enabled") private func ime_enabled(_ enabled: Bool)
 @_silgen_name("ime_skip_w_shortcut") private func ime_skip_w_shortcut(_ skip: Bool)
+@_silgen_name("ime_bracket_shortcut") private func ime_bracket_shortcut(_ enabled: Bool)
 @_silgen_name("ime_esc_restore") private func ime_esc_restore(_ enabled: Bool)
 @_silgen_name("ime_free_tone") private func ime_free_tone(_ enabled: Bool)
 @_silgen_name("ime_modern") private func ime_modern(_ modern: Bool)
@@ -491,7 +532,7 @@ class RustBridge {
         guard r.action == 1 else { return nil }
 
         let chars = withUnsafePointer(to: r.chars) { p in
-            p.withMemoryRebound(to: UInt32.self, capacity: 64) { bound in
+            p.withMemoryRebound(to: UInt32.self, capacity: 256) { bound in
                 (0..<Int(r.count)).compactMap { Unicode.Scalar(bound[$0]).map(Character.init) }
             }
         }
@@ -515,6 +556,12 @@ class RustBridge {
     static func setSkipWShortcut(_ skip: Bool) {
         ime_skip_w_shortcut(skip)
         Log.info("Skip W shortcut: \(skip)")
+    }
+
+    /// Set whether bracket shortcuts are enabled: ] → ư, [ → ơ (Issue #159)
+    static func setBracketShortcut(_ enabled: Bool) {
+        ime_bracket_shortcut(enabled)
+        Log.info("Bracket shortcut: \(enabled)")
     }
 
     /// Set whether ESC key restores raw ASCII input
@@ -556,8 +603,8 @@ class RustBridge {
 
     /// Get full composed buffer as string (for Select All injection method)
     static func getFullBuffer() -> String {
-        var buffer = [UInt32](repeating: 0, count: 64)
-        let len = ime_get_buffer(&buffer, 64)
+        var buffer = [UInt32](repeating: 0, count: 256)
+        let len = ime_get_buffer(&buffer, 256)
         guard len > 0 else { return "" }
         return String(buffer[0..<len].compactMap { Unicode.Scalar($0).map(Character.init) })
     }
@@ -711,6 +758,8 @@ private var shortcutObserver: NSObjectProtocol?
 /// Skip word restore after mouse click (user may be selecting/deleting text)
 /// Reset to false after first keystroke
 private var skipWordRestoreAfterClick = false
+/// Track Control key state to detect keydown for buffer clearing (Issue #150)
+private var wasControlPressed = false
 
 // MARK: - Word Restore Support
 
@@ -924,6 +973,15 @@ private func keyboardCallback(
 
     // Handle modifier-only shortcuts (Ctrl+Shift, Cmd+Option, etc.)
     if type == .flagsChanged {
+        // Issue #150: Control key press clears buffer (rhythm break like EVKey)
+        let isControlNowPressed = flags.contains(.maskControl)
+        if isControlNowPressed && !wasControlPressed {
+            // Control just pressed - clear buffer to break rhythm
+            RustBridge.clearBuffer()
+            TextInjector.shared.clearSessionBuffer()
+        }
+        wasControlPressed = isControlNowPressed
+
         if matchesModifierOnlyShortcut(flags: flags) {
             wasModifierShortcutPressed = true
         } else if wasModifierShortcutPressed {
@@ -1285,15 +1343,21 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         Log.method("ax:arc"); return cached(.axDirect, (0, 0, 0))
     }
 
-    // Firefox-based browsers - use AX API
+    // Firefox-based browsers - use selection method for address bar (AXTextField)
+    // Use AX API only for content areas (AXWindow) where selection method doesn't work
+    // Note: AX method was causing interference with mouse word selection (Issue #160)
     let firefoxBrowsers = [
         "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly",
         "org.waterfoxproject.waterfox", "io.gitlab.librewolf-community.librewolf",
         "one.ablaze.floorp", "org.torproject.torbrowser", "net.mullvad.mullvadbrowser",
         "app.zen-browser.zen"
     ]
-    if firefoxBrowsers.contains(bundleId) && (role == "AXTextField" || role == "AXWindow") {
-        Log.method("ax:firefox"); return cached(.axDirect, (0, 0, 0))
+    if firefoxBrowsers.contains(bundleId) {
+        if role == "AXTextField" {
+            Log.method("sel:firefox"); return cached(.selection, (0, 0, 0))  // Address bar
+        } else if role == "AXWindow" {
+            Log.method("ax:firefox"); return cached(.axDirect, (0, 0, 0))  // Content area
+        }
     }
 
     // Browser address bars (AXTextField with autocomplete)
@@ -1330,7 +1394,8 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         "com.pushplaylabs.sidekick",     // Sidekick
         "com.firstversionist.polypane",  // Polypane
         "ai.perplexity.comet",           // Comet (Perplexity AI)
-        "com.duckduckgo.macos.browser"   // DuckDuckGo
+        "com.duckduckgo.macos.browser",  // DuckDuckGo
+        "com.openai.atlas"               // ChatGPT Atlas
     ]
     if browsers.contains(bundleId) && role == "AXTextField" { Log.method("sel:browser"); return cached(.selection, (0, 0, 0)) }
     if role == "AXTextField" && bundleId.hasPrefix("com.jetbrains") { Log.method("sel:jb"); return cached(.selection, (0, 0, 0)) }

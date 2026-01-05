@@ -8,14 +8,27 @@ import AppKit
 class SoundManager {
     static let shared = SoundManager()
 
-    private init() {}
+    // Cache sound instances to prevent issues with rapid toggling
+    // Issue #168: sounds not playing when toggling rapidly
+    private let enableSound: NSSound?
+    private let disableSound: NSSound?
+    private var currentSound: NSSound?
+
+    private init() {
+        enableSound = NSSound(named: NSSound.Name("Tink"))
+        disableSound = NSSound(named: NSSound.Name("Pop"))
+    }
 
     func playToggleSound(enabled: Bool) {
         guard AppState.shared.soundEnabled else { return }
-        // Use different system sounds for on/off states
-        // "Tink" for enabling Vietnamese, "Pop" for disabling
-        let soundName = enabled ? "Tink" : "Pop"
-        NSSound(named: NSSound.Name(soundName))?.play()
+
+        // Stop any currently playing sound to handle rapid toggling
+        currentSound?.stop()
+
+        // Use cached sound instances
+        let sound = enabled ? enableSound : disableSound
+        currentSound = sound
+        sound?.play()
     }
 }
 
@@ -85,6 +98,13 @@ class AppState: ObservableObject {
         }
     }
 
+    @Published var bracketShortcut: Bool = false {
+        didSet {
+            UserDefaults.standard.set(bracketShortcut, forKey: SettingsKey.bracketShortcut)
+            RustBridge.setBracketShortcut(bracketShortcut)
+        }
+    }
+
     @Published var escRestore: Bool = false {
         didSet {
             UserDefaults.standard.set(escRestore, forKey: SettingsKey.escRestore)
@@ -150,6 +170,7 @@ class AppState: ObservableObject {
         toggleShortcut = KeyboardShortcut.load()
         perAppModeEnabled = defaults.bool(forKey: SettingsKey.perAppMode)
         autoWShortcut = defaults.bool(forKey: SettingsKey.autoWShortcut)
+        bracketShortcut = defaults.bool(forKey: SettingsKey.bracketShortcut)
         escRestore = defaults.bool(forKey: SettingsKey.escRestore)
         modernTone = defaults.bool(forKey: SettingsKey.modernTone)
         englishAutoRestore = defaults.bool(forKey: SettingsKey.englishAutoRestore)
@@ -173,6 +194,7 @@ class AppState: ObservableObject {
         RustBridge.setEnabled(isEnabled)
         RustBridge.setMethod(currentMethod.rawValue)
         RustBridge.setSkipWShortcut(!autoWShortcut)
+        RustBridge.setBracketShortcut(bracketShortcut)
         RustBridge.setEscRestore(escRestore)
         RustBridge.setModernTone(modernTone)
         RustBridge.setEnglishAutoRestore(englishAutoRestore)
@@ -678,6 +700,8 @@ struct SettingsPageView: View {
                 if appState.currentMethod == .telex {
                     Divider().padding(.leading, 12)
                     SettingsToggleRow("Gõ W thành Ư ở đầu từ", isOn: $appState.autoWShortcut)
+                    Divider().padding(.leading, 12)
+                    SettingsToggleRow("Gõ ] thành Ư, [ thành Ơ", isOn: $appState.bracketShortcut)
                 }
             }
             .cardBackground()

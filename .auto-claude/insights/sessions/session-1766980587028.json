@@ -1,0 +1,39 @@
+{
+  "id": "session-1766980587028",
+  "projectId": "005e2e43-6505-43f7-896d-562398111a8c",
+  "title": "branch hiện tại (my-branch-2) có những update gì v...",
+  "messages": [
+    {
+      "id": "msg-1766980587029",
+      "role": "user",
+      "content": "branch hiện tại (my-branch-2) có những update gì về mặt tính năng so với nhánh main",
+      "timestamp": "2025-12-29T03:56:27.029Z"
+    },
+    {
+      "id": "msg-1766980606737",
+      "role": "user",
+      "content": "branch hiện tại (my-branch-2) có những update gì về mặt tính năng so với nhánh main",
+      "timestamp": "2025-12-29T03:56:46.737Z"
+    },
+    {
+      "id": "msg-1766980665703",
+      "role": "user",
+      "content": "branch hiện tại (my-branch-2) có những update gì về mặt tính năng so với nhánh main",
+      "timestamp": "2025-12-29T03:57:45.703Z"
+    },
+    {
+      "id": "msg-1766980694807",
+      "role": "user",
+      "content": "branch hiện tại (my-branch-2) có những update gì về mặt tính năng so với nhánh main",
+      "timestamp": "2025-12-29T03:58:14.807Z"
+    },
+    {
+      "id": "msg-1766980922771",
+      "role": "user",
+      "content": "branch hiện tại (my-branch-2) có những update gì về mặt tính năng so với nhánh main",
+      "timestamp": "2025-12-29T04:02:02.771Z"
+    }
+  ],
+  "createdAt": "2025-12-29T03:56:27.028Z",
+  "updatedAt": "2025-12-29T04:02:02.771Z"
+}

@@ -272,6 +272,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
         // Sync all engine settings (these were loaded before engine was ready)
         RustBridge.setModernTone(appState.modernTone)
         RustBridge.setSkipWShortcut(!appState.autoWShortcut)
+        RustBridge.setBracketShortcut(appState.bracketShortcut)
         RustBridge.setEscRestore(appState.escRestore)
         RustBridge.setEnglishAutoRestore(appState.englishAutoRestore)
         RustBridge.setAutoCapitalize(appState.autoCapitalize)
@@ -478,6 +479,9 @@ class MenuBarController: NSObject, NSWindowDelegate {
 
         appMenu.addItem(NSMenuItem.separator())
 
+        // Close window (⌘W)
+        appMenu.addItem(NSMenuItem(title: "Đóng cửa sổ", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+
         // Quit (⌘Q)
         let quitItem = NSMenuItem(
             title: "Thoát \(AppMetadata.name)",
@@ -502,6 +506,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
         editMenu.addItem(NSMenuItem(title: "Chọn tất cả", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
 
         mainMenu.addItem(editMenuItem)
+
         NSApp.mainMenu = mainMenu
     }
 
