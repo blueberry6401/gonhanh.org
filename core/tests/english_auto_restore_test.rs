@@ -415,6 +415,8 @@ fn vietnamese_complex_words_preserved() {
         ("truwowcs ", "trước "),   // trước (before)
         ("giuwowngf ", "giường "), // giường (bed)
         ("twong ", "tương "),      // tương (mutual) - shorthand telex
+        ("wng ", "ưng "),          // ưng (agree) - w→ư + ng final
+        ("wong ", "ương "),        // ương (foster) - w→ư, o→ơ horn compound
         // Words with circumflex (â, ê, ô)
         ("caaps ", "cấp "), // cấp (level)
         ("taanf ", "tần "), // tần (frequency)
@@ -909,6 +911,11 @@ fn vietnamese_eu_diphthong_not_restored() {
         ("lesue ", "lếu "), // l + e + s + u + e → lếu
         ("tesue ", "tếu "), // t + e + s + u + e → tếu
         ("mesue ", "mếu "), // m + e + s + u + e → mếu
+        // Issue #183: Flexible order - mark after second vowel trigger
+        // Pattern: C + V1 + V2 + V1 + mark → circumflex on V1 + mark
+        ("neues ", "nếu "), // n + e + u + e + s(sắc) → nếu (mark after vowel trigger)
+        ("neuef ", "nều "), // n + e + u + e + f(huyền) → nều
+        ("keues ", "kếu "), // k + e + u + e + s → kếu
     ]);
 }
 

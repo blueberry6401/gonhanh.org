@@ -1606,7 +1606,21 @@ impl Engine {
                                     && !is_english_qu_pattern
                                     && constants::VALID_TRIPHTHONGS
                                         .contains(&[vowels[0], vowels[1], vowels[2]]);
-                                if !is_valid_vn_triphthong {
+
+                                // Issue #183: Also allow V1-V2 diphthongs requiring circumflex on V1
+                                // e.g., "neue" → [e, u] = êu (nếu), "xaua" → [a, u] = âu (xấu)
+                                // When typing the second V1, it should trigger circumflex on first V1
+                                // BUT: Exclude English "qu" patterns (like "queue")
+                                let v1_circumflex_diphthongs: &[[u16; 2]] = &[
+                                    [keys::A, keys::U], // âu - "dấu", "xấu"
+                                    [keys::A, keys::Y], // ây - "dây"
+                                    [keys::E, keys::U], // êu - "nếu", "kêu"
+                                    [keys::O, keys::I], // ôi - "tối"
+                                ];
+                                let is_valid_v1_circumflex_diphthong = !is_english_qu_pattern
+                                    && v1_circumflex_diphthongs.contains(&[v1, v2]);
+
+                                if !is_valid_vn_triphthong && !is_valid_v1_circumflex_diphthong {
                                     return None;
                                 }
                             }
@@ -4471,7 +4485,32 @@ impl Engine {
 
                 // W + vowel + consonant → likely English like "win", "water"
                 // W + consonant only → valid Vietnamese (ưng, ưn, ưm)
+                // EXCEPTION: W+O+final is valid Vietnamese "ươ+final" (ương, ươn, ươm, ươc, ươt, ươp)
                 if !vowels_after.is_empty() && !consonants_after.is_empty() {
+                    // Check for W+O+valid_final pattern (ương, ươn, ươm, etc.)
+                    // raw_input: [W, O, N, G] → valid Vietnamese ương
+                    // raw_input: [W, O, M] → valid Vietnamese ươm
+                    let is_wo_final_pattern = vowels_after.len() == 1
+                        && vowels_after[0] == keys::O
+                        && match consonants_after.len() {
+                            1 => {
+                                // Single consonant finals: n, m, c, t, p
+                                matches!(
+                                    consonants_after[0],
+                                    keys::N | keys::M | keys::C | keys::T | keys::P
+                                )
+                            }
+                            2 => {
+                                // Double consonant finals: ng, nh
+                                let pair = [consonants_after[0], consonants_after[1]];
+                                pair == [keys::N, keys::G] || pair == [keys::N, keys::H]
+                            }
+                            _ => false,
+                        };
+                    if is_wo_final_pattern {
+                        // Valid Vietnamese "ươ+final", don't restore
+                        return false;
+                    }
                     // Both vowels and consonants after W → likely English
                     return true;
                 }
