@@ -622,33 +622,17 @@ impl Engine {
         // Also auto-restore invalid Vietnamese to raw English
         if key == keys::SPACE {
             // Handle pending mark revert pop on space (end of word)
-            // When user types "simss" → mark reverted → raw should be "sims" not "simss"
-            // This is deferred from the revert action to support "issue" pattern
-            //
-            // EXCEPTION: Double 'f' should NOT pop because 'ff' is very common in English
-            // (off, offer, office, coffee, effect, etc.). Keeping both 'f's in raw_input
-            // ensures auto-restore produces "off" not "of".
+            // When telex_double_raw is set, we use it directly for restore, no pop needed.
+            // The telex_double_raw contains the exact original input before any modification.
+            // Examples:
+            //   "nurses" → telex_double_raw="nurses", use directly for restore
+            //   "simss" → telex_double_raw="simss", use directly for restore (ss→sims via whitelist)
+            //   "taxxi" → telex_double_raw="taxx", buffer "taxi" kept (clean, no marks)
             if self.pending_mark_revert_pop {
                 self.pending_mark_revert_pop = false;
-                // Pop the consumed mark key from raw_input
-                // raw_input: [..., mark_key, revert_key] → [..., revert_key]
-                // SKIP for double 'f' or double 's' to preserve 'ff'/'ss' for auto-restore
-                // because these are very common in English (off, offer, guess, miss, class, etc.)
-                if self.raw_input.len() >= 2 {
-                    let len = self.raw_input.len();
-                    let (last_key, _, _) = self.raw_input[len - 1];
-                    let (second_last_key, _, _) = self.raw_input[len - 2];
-                    let is_double_f = last_key == keys::F && second_last_key == keys::F;
-                    let is_double_s = last_key == keys::S && second_last_key == keys::S;
-
-                    if !is_double_f && !is_double_s {
-                        let revert_key = self.raw_input.pop();
-                        self.raw_input.pop(); // mark_key (consumed)
-                        if let Some(k) = revert_key {
-                            self.raw_input.push(k);
-                        }
-                    }
-                }
+                // telex_double_raw is always set when pending_mark_revert_pop is true
+                // (both set in revert_mark). Don't modify raw_input here - use
+                // telex_double_raw for restore which has the correct original chars.
             }
 
             // First check for shortcut
@@ -932,45 +916,15 @@ impl Engine {
     fn process(&mut self, key: u16, caps: bool, shift: bool) -> Result {
         let m = input::get(self.method);
 
-        // Handle pending mark revert pop: if previous key was a mark revert (like "ss"),
-        // and THIS key is a consonant, pop the consumed modifier from raw_input.
-        // This differentiates:
-        // - "tesst" → 't' is consonant → pop → raw becomes [t,e,s,t] → "test"
-        // - "issue" → 'u' is vowel → don't pop → raw stays [i,s,s,u,e] → "issue"
+        // Handle pending mark revert pop: if previous key was a mark revert,
+        // reset the flag. When telex_double_raw is set, we use it directly for
+        // restore, so no need to modify raw_input here.
+        // For vowel (issue) vs consonant (test) patterns, the whitelist and
+        // restore logic will handle them correctly using telex_double_raw.
         if self.pending_mark_revert_pop && keys::is_letter(key) {
             self.pending_mark_revert_pop = false;
-            if keys::is_consonant(key) {
-                // Pop the consumed modifier key from raw_input
-                // raw_input currently has: [..., mark_key, revert_key, current_key]
-                // We want: [..., revert_key, current_key]
-                // So we pop current, pop revert, pop mark, push revert, push current
-                //
-                // EXCEPTION: Double tone modifiers should NOT pop because they're common in English:
-                // - 'ff': offline, offer, office, coffee, effect, staff, stuff, etc.
-                // - 'ss': harassment, mississippi, class, miss, pass, boss, etc.
-                // - 'rr': diarrhea, arrhythmia, error, mirror, horror, terror, etc.
-                // Auto-restore at word-end will handle these correctly by checking whitelist.
-                if self.raw_input.len() >= 3 {
-                    let len = self.raw_input.len();
-                    let (revert_key, _, _) = self.raw_input[len - 2];
-                    let (mark_key, _, _) = self.raw_input[len - 3];
-                    let is_double_f = revert_key == keys::F && mark_key == keys::F;
-                    let is_double_s = revert_key == keys::S && mark_key == keys::S;
-                    let is_double_r = revert_key == keys::R && mark_key == keys::R;
-
-                    if !is_double_f && !is_double_s && !is_double_r {
-                        let current = self.raw_input.pop(); // current key (just added)
-                        let revert = self.raw_input.pop(); // revert key
-                        self.raw_input.pop(); // mark key (consumed, discard)
-                        if let Some(r) = revert {
-                            self.raw_input.push(r);
-                        }
-                        if let Some(c) = current {
-                            self.raw_input.push(c);
-                        }
-                    }
-                }
-            }
+            // telex_double_raw is always set when pending_mark_revert_pop is true
+            // (both set in revert_mark). Don't modify raw_input here.
         }
 
         // Revert short-pattern stroke when new letter creates invalid Vietnamese
@@ -2480,12 +2434,19 @@ impl Engine {
                     .skip(pos + 1)
                     .any(|ch| !keys::is_vowel(ch.key));
 
-                if has_consonant_after {
-                    // Consonant after: REVERT the mark (remove dấu)
+                // Check if vowel is at the END of buffer (no chars after at all)
+                // Issue #197: After backspace, vowel may be at end - pressing same
+                // mark key should REVERT, not absorb
+                // Example: "serv" → "sẻv" → backspace → "sẻ" → 'r' should → "ser"
+                let is_vowel_at_end = pos + 1 >= self.buf.len();
+
+                if has_consonant_after || is_vowel_at_end {
+                    // Consonant after OR vowel at end: REVERT the mark (remove dấu)
                     // "lists" → "lits", user typed s twice to undo the mark
+                    // "sẻ" → "se", user typed r after backspace to undo the mark
                     return Some(self.revert_mark(key, caps));
                 } else {
-                    // Only vowels after: absorb (user double-tapped in same syllable)
+                    // Vowels after (not at end): absorb (user double-tapped in same syllable)
                     // "roofif" → "rồi"
                     return Some(Result::send(0, &[]));
                 }
@@ -3822,7 +3783,7 @@ impl Engine {
             // Example: "reff" → buffer "ref" (no marks, no repeats) → keep "ref"
             // But: "assssess" → buffer "asssess" (has repeated 's') → continue to collapse
             // But: "prooff" → buffer "prôf" (has mark ô) → continue to other logic
-            if self.telex_double_raw.is_some() {
+            if let Some(ref stored) = self.telex_double_raw {
                 let has_marks = self.buf.iter().any(|c| c.tone > 0 || c.mark > 0);
                 let has_stroke = self.buf.iter().any(|c| c.stroke);
                 let buffer_str = self.get_buffer_string();
@@ -3831,7 +3792,20 @@ impl Engine {
                     .as_bytes()
                     .windows(2)
                     .any(|w| w[0] == w[1] && matches!(w[0], b's' | b'f' | b'r' | b'x' | b'j'));
-                if !has_marks && !has_stroke && !has_repeated_consonant {
+                // Check if full restored input is longer than buffer
+                // This happens when modifiers were consumed (e.g., "nurses" → "nues")
+                // Calculate full restore length: stored + subsequent chars after telex_double_raw_len
+                // "taxxi" → stored="taxx"(4) + subsequent="i"(1) = 5, buf="taxi"(4) → 5 > 4? Yes but ok (1 diff)
+                // "nurses" → stored="nurses"(6) + ""(0) = 6, buf="nues"(4) → 6 > 4? Yes (2 diff) → restore
+                // "nursest" → stored="nurses"(6) + "t"(1) = 7, buf="nuest"(5) → 7 > 5? Yes (2 diff) → restore
+                let subsequent_len = self
+                    .raw_input
+                    .len()
+                    .saturating_sub(self.telex_double_raw_len);
+                let full_restore_len = stored.len() + subsequent_len;
+                // If restored is more than 1 char longer than buffer, modifiers were consumed → restore
+                let raw_much_longer = full_restore_len > self.buf.len() + 1;
+                if !has_marks && !has_stroke && !has_repeated_consonant && !raw_much_longer {
                     return None; // Keep buffer (clean, no Vietnamese transforms)
                 }
             }
@@ -6212,28 +6186,46 @@ impl Engine {
     ///
     /// Called when ESC is pressed. Replaces transformed output with original keystrokes.
     /// Example: "tẽt" (from typing "text" in Telex) → "text"
+    /// Example: "of" → "ò" → ESC → "of" (mark was applied)
+    /// Example: "off" → "of" → ESC → "off" (mark was applied then reverted)
     fn restore_to_raw(&self) -> Result {
         if self.raw_input.is_empty() || self.buf.is_empty() {
             return Result::none();
         }
 
-        // Check if any transforms were applied
-        let has_transforms = self
-            .buf
-            .iter()
-            .any(|c| c.tone > 0 || c.mark > 0 || c.stroke);
-        if !has_transforms {
+        // Build raw ASCII output from raw_input history
+        // If telex_double_raw is set (revert happened), use it as base and append subsequent chars
+        // This ensures "aww" → ESC → "aww" (not "aw"), "a66" → ESC → "a66" (not "a6")
+        let raw_chars: Vec<char> = if let Some(ref base_raw) = self.telex_double_raw {
+            // Start with the original raw string before revert modification
+            let mut chars: Vec<char> = base_raw.chars().collect();
+            // Append any characters typed after the revert
+            for &(key, caps, shift) in self.raw_input.iter().skip(self.telex_double_raw_len) {
+                if let Some(ch) = utils::key_to_char_ext(key, caps, shift) {
+                    chars.push(ch);
+                }
+            }
+            chars
+        } else {
+            // Normal case: use raw_input directly
+            self.raw_input
+                .iter()
+                .filter_map(|&(key, caps, shift)| utils::key_to_char_ext(key, caps, shift))
+                .collect()
+        };
+
+        if raw_chars.is_empty() {
             return Result::none();
         }
 
-        // Build raw ASCII output from raw_input history
-        let raw_chars: Vec<char> = self
-            .raw_input
-            .iter()
-            .filter_map(|&(key, caps, shift)| utils::key_to_char_ext(key, caps, shift))
-            .collect();
+        // Get current buffer content for comparison
+        let buffer_str = self.buf.to_full_string();
+        let raw_str: String = raw_chars.iter().collect();
 
-        if raw_chars.is_empty() {
+        // Only restore if:
+        // 1. Any transform was ever applied (even if later reverted), OR
+        // 2. Buffer differs from raw input (handles edge cases)
+        if !self.had_any_transform && buffer_str == raw_str {
             return Result::none();
         }
 
@@ -6320,12 +6312,38 @@ mod tests {
         ("dd\x1b", "dd"),         // đ → dd (stroke restore)
         ("vieejt\x1b", "vieejt"), // việt → vieejt (all typed keys)
         ("Vieejt\x1b", "Vieejt"), // Việt → Vieejt (preserve case)
+        // Mark revert cases: second modifier reverts, ESC should restore full raw input
+        ("of\x1b", "of"),   // ò → of (mark applied)
+        ("off\x1b", "off"), // of → off (mark applied then reverted by 2nd f)
+        ("ass\x1b", "ass"), // as → ass (mark applied then reverted by 2nd s)
+        ("arr\x1b", "arr"), // ar → arr (mark applied then reverted by 2nd r)
+        ("axx\x1b", "axx"), // ax → axx (mark applied then reverted by 2nd x)
+        ("ajj\x1b", "ajj"), // aj → ajj (mark applied then reverted by 2nd j)
+        // More complex mark revert cases
+        ("bass\x1b", "bass"), // bás → bas → bass
+        ("boss\x1b", "boss"), // bòs → bos → boss
+        ("buff\x1b", "buff"), // bùf → buf → buff
+        ("diff\x1b", "diff"), // dìf → dif → diff
+        ("miss\x1b", "miss"), // mìs → mis → miss
+        ("pass\x1b", "pass"), // pás → pas → pass
+        ("jazz\x1b", "jazz"), // jaz → jazz (no mark on a, j only at start)
+        // Tone mark cases
+        ("too\x1b", "too"), // tô → to → too (circumflex applied then reverted)
+        ("see\x1b", "see"), // sê → se → see
+        ("bee\x1b", "bee"), // bê → be → bee
     ];
 
     const VNI_ESC_RESTORE: &[(&str, &str)] = &[
         ("a1\x1b", "a1"),         // á → a1
         ("vie65t\x1b", "vie65t"), // việt → vie65t
         ("d9\x1b", "d9"),         // đ → d9
+        // Mark revert cases in VNI mode
+        ("a11\x1b", "a11"), // á → a → a11 (mark applied then reverted by 2nd 1)
+        ("a22\x1b", "a22"), // à → a → a22 (huyền reverted)
+        ("a33\x1b", "a33"), // ả → a → a33 (hỏi reverted)
+        ("a44\x1b", "a44"), // ã → a → a44 (ngã reverted)
+        ("a55\x1b", "a55"), // ạ → a → a55 (nặng reverted)
+        ("a66\x1b", "a66"), // â → a → a66 (circumflex reverted)
     ];
 
     // Normal Vietnamese transforms apply
@@ -6376,6 +6394,49 @@ mod tests {
     #[test]
     fn test_telex_normal() {
         telex(TELEX_NORMAL);
+    }
+
+    #[test]
+    fn test_nurses_horses_esc_restore() {
+        // Debug test for nurses/horses ESC restore
+        let cases: &[(&str, &str)] = &[("nurses\x1b", "nurses"), ("horses\x1b", "horses")];
+        for (input, expected) in cases {
+            let mut e = Engine::new();
+            e.set_esc_restore(true);
+            let result = type_word(&mut e, input);
+            assert_eq!(result, *expected, "[ESC] '{}' → '{}'", input, result);
+        }
+    }
+
+    #[test]
+    fn test_nurses_horses_auto_restore() {
+        // Test patterns where multiple modifiers are consumed but not added to buffer
+        // These patterns have: mark1 + mark2 + vowel + revert_of_mark2
+        // Example: "nurses" = n-u-r(hỏi)-s(sắc replaces hỏi)-e-s(reverts sắc)
+        // Buffer becomes "nues" but raw_input has "nurses" which should restore
+        let cases: &[(&str, &str)] = &[
+            // Pattern: C-V-mark1-mark2-V-revert
+            ("nurses ", "nurses "),
+            ("horses ", "horses "),
+            ("verses ", "verses "),
+            ("curses ", "curses "),
+            ("purses ", "purses "),
+            // Pattern: C-V-mark1-mark2-V-C-revert (different ending)
+            ("nursest ", "nursest "), // Additional consonant before revert
+            // Pattern with different marks: r(hỏi)-f(huyền) then f reverts
+            ("surfed ", "surfed "), // s-u-r(hỏi)-f(huyền replaces)-e-d → buffer "sued", raw "surfed"
+            // ESC should work the same
+            ("nurses\x1b", "nurses"),
+            ("horses\x1b", "horses"),
+            ("verses\x1b", "verses"),
+        ];
+        for (input, expected) in cases {
+            let mut e = Engine::new();
+            e.set_english_auto_restore(true);
+            e.set_esc_restore(true);
+            let result = type_word(&mut e, input);
+            assert_eq!(result, *expected, "[Auto] '{}' → '{}'", input, result);
+        }
     }
 
     // =========================================================================
