@@ -714,6 +714,7 @@ dips	díp
 dwarfs	dứa
 pow	pơ
 loo	lô
+casas	cas
 ecr	ẻc
 masts	mats
 loot	lôt
@@ -845,6 +846,7 @@ cocoon	cocon
 bono	bôn
 ips	íp
 booze	boe
+dieses	dies
 esr	ẻ
 ree	rê
 caso	cáo
@@ -1097,6 +1099,7 @@ aca	âc
 thar	thả
 mujer	muẻ
 wwii	wii
+nyerere	nyere
 terns	tén
 nasir	nải
 amar	ẩm
@@ -2087,6 +2090,7 @@ rossa	rosa
 nueces	nuếc
 hys	hý
 doxa	doã
+bajaj	baj
 oom	ôm
 vix	vĩ
 haro	hảo
@@ -2192,6 +2196,7 @@ rosse	rose
 larus	láu
 posix	põi
 nias	nía
+meses	mes
 puer	puẻ
 esm	ém
 oost	ốt
@@ -2419,6 +2424,7 @@ passo	paso
 transf	tràn
 puro	puỏ
 yx	ỹ
+miserere	miere
 musts	muts
 ufw	ừ
 awwa	awa
@@ -2474,6 +2480,7 @@ kisch	kích
 ajay	ậy
 wus	ứu
 sarna	sẩn
+harar	har
 larix	lãi
 etfs	ét
 kyr	kỷ

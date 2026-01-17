@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "agent-os": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "/Users/hieptran/.agent-os/worktrees/agent-os-add-light-mode/mcp/orchestration-server.ts"
+      ],
+      "env": {
+        "AGENTOS_URL": "http://localhost:3011",
+        "CONDUCTOR_SESSION_ID": "1b64e6f3-6df7-43f8-959d-ded2ec28652d"
+      }
+    }
+  }
+}
