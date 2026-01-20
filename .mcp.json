@@ -10,6 +10,10 @@
         "AGENTOS_URL": "http://localhost:3011",
         "CONDUCTOR_SESSION_ID": "1b64e6f3-6df7-43f8-959d-ded2ec28652d"
       }
+    },
+    "gkg": {
+      "type": "sse",
+      "url": "http://localhost:27495/mcp/sse"
     }
   }
 }

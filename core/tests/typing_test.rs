@@ -376,6 +376,8 @@ const TELEX_TYPOS: &[(&str, &str)] = &[
     ("aaa", "aa"),
     ("ooo", "oo"),
     ("aww", "aw"),
+    // Delayed circumflex revert + continue typing
+    ("dataas", "datas"), // data → dâta → data (revert) → datas
     // Change mark mid-word
     ("asf", "à"),
     ("afs", "á"),

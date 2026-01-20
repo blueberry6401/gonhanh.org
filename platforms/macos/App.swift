@@ -43,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             SettingsKey.autoCapitalize: false,
             SettingsKey.soundEnabled: false,
             SettingsKey.toastEnabled: true,
+            SettingsKey.allowForeignConsonants: false,
         ])
     }
 }

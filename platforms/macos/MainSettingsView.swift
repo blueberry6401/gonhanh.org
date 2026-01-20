@@ -149,6 +149,13 @@ class AppState: ObservableObject {
         }
     }
 
+    @Published var allowForeignConsonants: Bool = false {
+        didSet {
+            UserDefaults.standard.set(allowForeignConsonants, forKey: SettingsKey.allowForeignConsonants)
+            RustBridge.setAllowForeignConsonants(allowForeignConsonants)
+        }
+    }
+
     @Published var toggleShortcut: KeyboardShortcut {
         didSet {
             toggleShortcut.save()
@@ -189,6 +196,7 @@ class AppState: ObservableObject {
         autoCapitalize = defaults.bool(forKey: SettingsKey.autoCapitalize)
         soundEnabled = defaults.bool(forKey: SettingsKey.soundEnabled)
         toastEnabled = defaults.bool(forKey: SettingsKey.toastEnabled)
+        allowForeignConsonants = defaults.bool(forKey: SettingsKey.allowForeignConsonants)
 
         // Sync settings to Rust engine
         syncAllToEngine()
@@ -211,6 +219,7 @@ class AppState: ObservableObject {
         RustBridge.setModernTone(modernTone)
         RustBridge.setEnglishAutoRestore(englishAutoRestore)
         RustBridge.setAutoCapitalize(autoCapitalize)
+        RustBridge.setAllowForeignConsonants(allowForeignConsonants)
     }
 
     private func loadShortcuts() {
@@ -752,6 +761,8 @@ struct SettingsPageView: View {
                 SettingsToggleRow("Đặt dấu kiểu mới (oà, uý)", isOn: $appState.modernTone)
                 Divider().padding(.leading, 12)
                 SettingsToggleRow("Tự viết hoa đầu câu", isOn: $appState.autoCapitalize)
+                Divider().padding(.leading, 12)
+                SettingsToggleRow("Cho phép z, w, j, f làm phụ âm", isOn: $appState.allowForeignConsonants)
                 Divider().padding(.leading, 12)
                 RestoreShortcutRecorderRow(
                     shortcut: $appState.restoreShortcut,
