@@ -5,7 +5,7 @@
 .DEFAULT_GOAL := help
 
 # Version from git tag
-TAG := $(shell git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo v0.0.0)
+TAG := $(shell git describe --tags --abbrev=0 --match "v*" --exclude "v*-pre*" 2>/dev/null || echo v0.0.0)
 VER := $(subst v,,$(TAG))
 NEXT_PATCH := $(shell echo $(VER) | awk -F. '{print $$1"."$$2"."$$3+1}')
 NEXT_MINOR := $(shell echo $(VER) | awk -F. '{print $$1"."$$2+1".0"}')
@@ -23,7 +23,8 @@ help:
 	@echo ""
 	@echo "\033[1;32mDev:\033[0m"
 	@echo "  test        Run Rust tests"
-	@echo "  format      Format + lint"
+	@echo "  format      Format code (Rust + Swift)"
+	@echo "  lint        Check lint (clippy + swiftformat)"
 	@echo "  build       Build + auto-open app"
 	@echo "  build-linux Build Linux Fcitx5"
 	@echo "  clean       Clean artifacts"
@@ -44,12 +45,13 @@ help:
 	@echo "  release       Patch  $(TAG) → v$(NEXT_PATCH)"
 	@echo "  release-minor Minor  $(TAG) → v$(NEXT_MINOR)"
 	@echo "  release-major Major  $(TAG) → v$(NEXT_MAJOR)"
+	@echo "  pre-release   Trigger pre-release build on CI"
 
 # ============================================================================
 # Development
 # ============================================================================
 
-.PHONY: test format build build-linux clean all
+.PHONY: test format lint build build-linux clean all
 all: test build
 
 test:
@@ -57,12 +59,19 @@ test:
 	@./scripts/test/dict.sh
 
 format:
-	@cd core && cargo fmt && cargo clippy -- -D warnings
+	@cd core && cargo fmt
+	@command -v swiftformat >/dev/null 2>&1 && swiftformat platforms/macos --quiet || echo "⚠️  swiftformat not found. Run: brew install swiftformat"
+
+lint:
+	@cd core && cargo clippy -- -D warnings
+	@command -v swiftformat >/dev/null 2>&1 && swiftformat platforms/macos --lint || echo "⚠️  swiftformat not found"
 
 build: format ## Build core + macos app
 	@./scripts/build/core.sh
 	@./scripts/build/macos.sh
 	@./scripts/build/windows.sh
+	@killall GoNhanh 2>/dev/null || true
+	@sleep 0.5
 	@open platforms/macos/build/Release/GoNhanh.app
 
 build-linux: format
@@ -73,7 +82,8 @@ clean: ## Clean build + settings
 	@rm -rf platforms/macos/build
 	@rm -rf platforms/linux/build
 	@defaults delete org.gonhanh.GoNhanh 2>/dev/null || true
-	@echo "✅ Cleaned build artifacts + settings"
+	@osascript -e 'tell application "System Events"' -e 'repeat with i from (count of every login item) to 1 by -1' -e 'set li to login item i' -e 'if name of li is "GoNhanh" and path of li contains "/build/" then delete login item i' -e 'end repeat' -e 'end tell' 2>/dev/null || true
+	@echo "✅ Cleaned build artifacts + settings + all login items"
 
 # ============================================================================
 # Debug
@@ -113,7 +123,11 @@ setup: ## Setup dev environment
 	@./scripts/setup/macos.sh
 
 install: build
+	@osascript -e 'tell application "System Events"' -e 'repeat with i from (count of every login item) to 1 by -1' -e 'set li to login item i' -e 'if name of li is "GoNhanh" and path of li contains "/build/" then delete login item i' -e 'end repeat' -e 'end tell' 2>/dev/null || true
+	@killall GoNhanh 2>/dev/null || true
+	@sleep 0.5
 	@cp -r platforms/macos/build/Release/GoNhanh.app /Applications/
+	@open /Applications/GoNhanh.app
 
 dmg: build ## Create DMG installer
 	@./scripts/release/dmg-background.sh
@@ -123,9 +137,10 @@ dmg: build ## Create DMG installer
 # Release (auto-versioning from git tags)
 # ============================================================================
 
-.PHONY: release release-minor release-major
+.PHONY: release release-minor release-major pre-release
 
 release: ## Patch release (1.0.9 → 1.0.10)
+	@git pull --rebase origin main --tags
 	@echo "$(TAG) → v$(NEXT_PATCH)"
 	@git add -A && git commit -m "release: v$(NEXT_PATCH)" --allow-empty
 	@./scripts/release/notes.sh v$(NEXT_PATCH) > /tmp/release_notes.md
@@ -134,6 +149,7 @@ release: ## Patch release (1.0.9 → 1.0.10)
 	@echo "→ https://github.com/khaphanspace/gonhanh.org/releases"
 
 release-minor: ## Minor release (1.0.9 → 1.1.0)
+	@git pull --rebase origin main --tags
 	@echo "$(TAG) → v$(NEXT_MINOR)"
 	@git add -A && git commit -m "release: v$(NEXT_MINOR)" --allow-empty
 	@./scripts/release/notes.sh v$(NEXT_MINOR) > /tmp/release_notes.md
@@ -142,9 +158,15 @@ release-minor: ## Minor release (1.0.9 → 1.1.0)
 	@echo "→ https://github.com/khaphanspace/gonhanh.org/releases"
 
 release-major: ## Major release (1.0.9 → 2.0.0)
+	@git pull --rebase origin main --tags
 	@echo "$(TAG) → v$(NEXT_MAJOR)"
 	@git add -A && git commit -m "release: v$(NEXT_MAJOR)" --allow-empty
 	@./scripts/release/notes.sh v$(NEXT_MAJOR) > /tmp/release_notes.md
 	@git tag -a v$(NEXT_MAJOR) -F /tmp/release_notes.md --cleanup=verbatim
 	@git push origin main v$(NEXT_MAJOR)
 	@echo "→ https://github.com/khaphanspace/gonhanh.org/releases"
+
+pre-release: ## Trigger pre-release build on CI
+	@gh workflow run pre-release.yml -f platform=macos -R khaphanspace/gonhanh.org
+	@echo "✅ Pre-release build triggered"
+	@echo "→ https://github.com/khaphanspace/gonhanh.org/actions/workflows/pre-release.yml"

@@ -28,7 +28,7 @@ permissions:
   pull-requests: read
 
 env:
-  # Apple Developer Configuration (only used if sign=true or for release builds)
+  # Apple Developer Configuration (only used if sign=true)
   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
   APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
 
@@ -118,25 +118,34 @@ jobs:
       # ============================================================
       # PACKAGE (Set version BEFORE signing)
       # ============================================================
-      - name: Get version from latest tag
+      - name: Get version from latest release tag
         id: version
         run: |
           git fetch --tags
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          # Find latest RELEASE tag (exclude pre-release tags with "-")
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -v '-' | head -1)
+          LATEST_TAG="${LATEST_TAG:-v1.0.0}"
           BASE_VERSION="${LATEST_TAG#v}"
-          SHORT_SHA="${GITHUB_SHA:0:7}"
+          # Bump patch version by 1 so pre-release is HIGHER than current release
+          MAJOR=$(echo "$BASE_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$BASE_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$BASE_VERSION" | cut -d. -f3)
+          NEXT_PATCH=$((PATCH + 1))
           BUILD_NUM="${GITHUB_RUN_NUMBER}"
-          VERSION="${BASE_VERSION}-pre.${BUILD_NUM}.${SHORT_SHA}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Pre-release version: $VERSION (build #${BUILD_NUM})"
+          # Display version (human-readable, shown in UI)
+          DISPLAY_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}-pre.${BUILD_NUM}"
+          # Bundle version (pure numeric for comparison)
+          BUNDLE_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}.${BUILD_NUM}"
+          echo "version=$DISPLAY_VERSION" >> $GITHUB_OUTPUT
+          echo "bundle_version=$BUNDLE_VERSION" >> $GITHUB_OUTPUT
+          echo "Pre-release: $DISPLAY_VERSION (bundle: $BUNDLE_VERSION, base: $LATEST_TAG)"
 
       - name: Set version in app
         run: |
           cd platforms/macos
           APP="build/Build/Products/Release/GoNhanh.app"
-          V="${{ steps.version.outputs.version }}"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.version.outputs.bundle_version }}" "$APP/Contents/Info.plist"
 
       # ============================================================
       # CODE SIGNING (After version is set)
@@ -187,6 +196,23 @@ jobs:
           path: platforms/macos/build/*.dmg
           retention-days: 14
 
+      - name: Create GitHub Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd platforms/macos
+          V="${{ steps.version.outputs.version }}"
+          TAG_NAME="v${V}"
+          DMG_FILE=$(ls build/*.dmg | head -1)
+
+          gh release create "$TAG_NAME" \
+            --title "GoNhanh $V (Pre-release)" \
+            --notes "Pre-release build from CI." \
+            --prerelease \
+            "$DMG_FILE"
+
+          echo "Created pre-release: $TAG_NAME"
+
       # ============================================================
       # CLEANUP
       # ============================================================
@@ -230,17 +256,23 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
           make -j$(nproc)
 
-      - name: Get version from latest tag
+      - name: Get version from latest release tag
         id: version
         run: |
           git fetch --tags
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          # Find latest RELEASE tag (exclude pre-release tags with "-")
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -v '-' | head -1)
+          LATEST_TAG="${LATEST_TAG:-v1.0.0}"
           BASE_VERSION="${LATEST_TAG#v}"
-          SHORT_SHA="${GITHUB_SHA:0:7}"
+          # Bump patch version by 1 so pre-release is HIGHER than current release
+          MAJOR=$(echo "$BASE_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$BASE_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$BASE_VERSION" | cut -d. -f3)
+          NEXT_PATCH=$((PATCH + 1))
           BUILD_NUM="${GITHUB_RUN_NUMBER}"
-          VERSION="${BASE_VERSION}-pre.${BUILD_NUM}.${SHORT_SHA}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Pre-release version: $VERSION (build #${BUILD_NUM})"
+          DISPLAY_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}-pre.${BUILD_NUM}"
+          echo "version=$DISPLAY_VERSION" >> $GITHUB_OUTPUT
+          echo "Pre-release: $DISPLAY_VERSION (base: $LATEST_TAG)"
 
       - name: Package
         run: |

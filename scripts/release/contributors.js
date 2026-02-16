@@ -29,6 +29,7 @@ const EXCLUDED_USERS = new Set([
   'codecov[bot]',
   'vercel[bot]',
   'netlify[bot]',
+  'claude',
 ]);
 
 /**
@@ -40,6 +41,10 @@ async function fetchSponsors() {
       user(login: "${REPO_OWNER}") {
         sponsorshipsAsMaintainer(first: 100, activeOnly: false) {
           nodes {
+            tier {
+              name
+              monthlyPriceInDollars
+            }
             sponsorEntity {
               ... on User {
                 login
@@ -74,7 +79,7 @@ async function fetchSponsors() {
     const backers = [];
 
     for (const s of nodes) {
-      const price = s.sponsorEntity?.monthlyPriceInDollars || s.tier?.monthlyPriceInDollars || 0;
+      const price = s.tier?.monthlyPriceInDollars || 0;
       const sponsor = {
         login: s.sponsorEntity.login,
         avatar: s.sponsorEntity.avatarUrl,
