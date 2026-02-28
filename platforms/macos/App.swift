@@ -44,6 +44,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             SettingsKey.soundEnabled: false,
             SettingsKey.toastEnabled: true,
             SettingsKey.allowForeignConsonants: false,
+            SettingsKey.advancedMode: false,
         ])
     }
 }
