@@ -1447,3 +1447,12 @@ fn w_medial_vowel_modifier_pattern() {
         ("banwjg ", "bặng "), // nặng tone
     ]);
 }
+
+// =============================================================================
+// DOUBLE CONSONANT AUTO-RESTORE
+// =============================================================================
+
+#[test]
+fn double_consonant_auto_restore_missa_business() {
+    telex_auto_restore(&[("missa ", "misa "), ("bussiness ", "business ")]);
+}

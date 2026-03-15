@@ -20,6 +20,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
 
     private let appState = AppState.shared
     private var cancellables = Set<AnyCancellable>()
+    private var pendingRestart: DispatchWorkItem?
 
     override init() {
         super.init()
@@ -156,17 +157,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
         subtitle.textColor = .secondaryLabelColor
         subtitle.tag = 100 // For in-place updates
 
-        let toggleView = NSHostingView(rootView:
-            Toggle("", isOn: Binding(
-                get: { [weak self] in self?.appState.isEnabled ?? true },
-                set: { [weak self] newValue in
-                    self?.appState.isEnabled = newValue
-                    SoundManager.shared.playToggleSound(enabled: newValue)
-                    ToastWindowController.shared.showToast(isVietnamese: newValue)
-                }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden())
+        let toggleView = NSHostingView(rootView: MenuBarToggle())
 
         for view in [iconView, titleLabel, subtitle, toggleView] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -487,26 +478,59 @@ class MenuBarController: NSObject, NSWindowDelegate {
         NSApp.mainMenu = mainMenu
     }
 
+    // MARK: - Restart Management
+
+    func cancelPendingRestart() {
+        pendingRestart?.cancel()
+        pendingRestart = nil
+    }
+
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow,
               window === settingsWindow else { return }
+
         window.contentViewController = nil
         settingsWindow = nil
         NSApp.setActivationPolicy(.accessory)
+
         // Restart app to reclaim memory if enabled
-        // Skip restart if app is quitting (Cmd+Q or menu Thoát)
-        let isQuitting = (NSApp.delegate as? AppDelegate)?.isQuitting ?? false
-        guard !isQuitting,
-              AppState.shared.advancedMode,
+        // Use deferred restart: if app is quitting, applicationWillTerminate
+        // will cancel this before it runs
+        guard AppState.shared.advancedMode,
               AppState.shared.restartOnClose else { return }
-        // Terminate first, then relaunch via detached shell script after short delay
         let path = Bundle.main.bundleURL.path
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 0.5 && open '\(path)'"]
-        try? task.run()
-        NSApp.terminate(nil)
+        let work = DispatchWorkItem { [weak self] in
+            guard self?.pendingRestart?.isCancelled == false else { return }
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/bin/sh")
+            task.arguments = ["-c", "sleep 0.5 && open '\(path)'"]
+            try? task.run()
+            NSApp.terminate(nil)
+        }
+        pendingRestart = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+}
+
+// MARK: - Menu Bar Toggle (SwiftUI)
+
+/// Observes AppState so the toggle reflects the actual enabled state.
+/// Uses explicit Binding so sound only plays on direct toggle clicks (not keyboard shortcut or per-app restore).
+struct MenuBarToggle: View {
+    @ObservedObject private var appState = AppState.shared
+
+    var body: some View {
+        Toggle("", isOn: Binding(
+            get: { appState.isEnabled },
+            set: { newValue in
+                appState.isEnabled = newValue
+                SoundManager.shared.playToggleSound(enabled: newValue)
+                ToastWindowController.shared.showToast(isVietnamese: newValue)
+            }
+        ))
+        .toggleStyle(.switch)
+        .labelsHidden()
     }
 }
