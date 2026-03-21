@@ -1154,7 +1154,8 @@ private func keyboardCallback(
     // Issue #275: Option-only (without Cmd/Ctrl) should NOT bypass IME for shortcuts
     // Option+Key produces special characters (e.g., Option+V → √) that can be shortcut triggers
     let hasOption = flags.contains(.maskAlternate)
-    let bypassIME = flags.contains(.maskCommand) || flags.contains(.maskControl)
+    let hasCmdOrCtrl = flags.contains(.maskCommand) || flags.contains(.maskControl)
+    let bypassIME = hasCmdOrCtrl
 
     // Enter: submit and trigger auto-capitalize pending state
     // IMPORTANT: Send Enter to engine FIRST to trigger auto-capitalize pending state,
@@ -1246,7 +1247,7 @@ private func keyboardCallback(
 
     // Issue #293: Option+Backspace deletes whole word at OS level
     // Clear engine buffer so state doesn't become stale after word deletion
-    if keyCode == KeyCode.backspace, hasOption, !bypassIME {
+    if keyCode == KeyCode.backspace, hasOption {
         RustBridge.clearBuffer()
         return Unmanaged.passUnretained(event)
     }
@@ -1290,22 +1291,20 @@ private func keyboardCallback(
         }
     }
 
-    // Issue #275: Handle Option-modified keys for special character shortcuts
-    // When Option is pressed (without Cmd/Ctrl), the key produces a special character
-    // (e.g., Option+V → √). Pass this character to engine for shortcut matching.
-    if hasOption, !bypassIME {
+    // Issue #275 + #307: Option+key → bypass Telex/VNI but still match shortcuts
+    // Option+V produces √, pass actual char to engine for shortcut matching (ctrl=true skips transforms)
+    if hasOption, !hasCmdOrCtrl {
         if let char = event.keyboardCharacter() {
-            // Process the actual character for shortcut matching
             if let (bs, chars, keyConsumed) = RustBridge.processKey(
-                keyCode: keyCode, caps: caps, ctrl: false, shift: shift, char: char
+                keyCode: keyCode, caps: caps, ctrl: true, shift: shift, char: char
             ) {
                 Log.key(keyCode, "option: bs=\(bs) chars='\(String(chars))' char='\(char)' consumed=\(keyConsumed)")
                 sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
-                return nil // Consume the event when shortcut matches
+                return nil
             }
-            // No shortcut match - let the character pass through normally
-            return Unmanaged.passUnretained(event)
         }
+        // No shortcut match - pass through for macOS to handle
+        return Unmanaged.passUnretained(event)
     }
 
     if let (bs, chars, keyConsumed) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: bypassIME, shift: shift) {
