@@ -755,12 +755,22 @@ class KeyboardHookManager {
         // Listen for keyboard events only (mouse handled by NSEvent monitor)
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.flagsChanged.rawValue)
-        let tap = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
-                                    options: .defaultTap, eventsOfInterest: mask,
-                                    callback: keyboardCallback, userInfo: nil)
-            ?? CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
-                                 options: .defaultTap, eventsOfInterest: mask,
-                                 callback: keyboardCallback, userInfo: nil)
+
+        // Session tap mode: intercept at cgSessionEventTap level so that synthetic events
+        // injected by remote desktop software (RustDesk, AnyDesk, TeamViewer) are visible.
+        // Default (HID tap): highest priority, physical keystrokes only, best for most cases.
+        let tap: CFMachPort? = if AppState.shared.sessionTapMode {
+            CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
+                              options: .defaultTap, eventsOfInterest: mask,
+                              callback: keyboardCallback, userInfo: nil)
+        } else {
+            CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
+                              options: .defaultTap, eventsOfInterest: mask,
+                              callback: keyboardCallback, userInfo: nil)
+                ?? CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
+                                     options: .defaultTap, eventsOfInterest: mask,
+                                     callback: keyboardCallback, userInfo: nil)
+        }
 
         guard let tap else {
             showAccessibilityAlert()
@@ -793,6 +803,9 @@ class KeyboardHookManager {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let src = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes) }
         if let monitor = mouseMonitor { NSEvent.removeMonitor(monitor) }
+        // Remove notification observers to prevent leak across restart() cycles
+        if let obs = shortcutObserver { NotificationCenter.default.removeObserver(obs); shortcutObserver = nil }
+        if let obs = restoreShortcutObserver { NotificationCenter.default.removeObserver(obs); restoreShortcutObserver = nil }
         eventTap = nil
         runLoopSource = nil
         mouseMonitor = nil
@@ -801,6 +814,13 @@ class KeyboardHookManager {
 
     func getTap() -> CFMachPort? {
         eventTap
+    }
+
+    /// Restart the keyboard hook with the current tap mode setting.
+    /// Called when sessionTapMode is toggled in settings.
+    func restart() {
+        stop()
+        start()
     }
 
     private func showAccessibilityAlert() {
@@ -1467,6 +1487,20 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     // iPhone Mirroring (ScreenContinuity) - pass through all keys
     if bundleId == "com.apple.ScreenContinuity" {
         return cached(.passthrough, (0, 0, 0), "pass:iphone")
+    }
+
+    // Remote desktop clients - pass through all keys
+    // These apps forward physical keystrokes to the remote machine over the network.
+    // GoNhanh's synthetic injections (backspace + Vietnamese char) are NOT forwarded,
+    // causing garbled input on the remote. Passthrough lets raw keys reach the remote
+    // intact; Vietnamese composition must happen on the remote machine itself.
+    let remoteDesktopApps: Set<String> = [
+        "com.carriez.rustdesk", // RustDesk
+        "com.philandro.anydesk", // AnyDesk
+        "com.teamviewer.TeamViewer", // TeamViewer
+    ]
+    if remoteDesktopApps.contains(bundleId) {
+        return cached(.passthrough, (0, 0, 0), "pass:remote")
     }
 
     // Selection method for autocomplete UI elements
