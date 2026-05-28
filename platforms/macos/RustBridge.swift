@@ -856,6 +856,10 @@ private var restoreShortcutObserver: NSObjectProtocol?
 private var skipWordRestoreAfterClick = false
 /// Track Control key state to detect keydown for buffer clearing (Issue #150)
 private var wasControlPressed = false
+/// Deferred Issue #150 rhythm break: set when Ctrl is pressed and Ctrl is part of a
+/// modifier-only restore shortcut. Cleared if the shortcut activates (so restore keeps data),
+/// or applied when Ctrl is released without the shortcut firing.
+private var pendingControlRhythmBreak = false
 
 // MARK: - Word Restore Support
 
@@ -1113,11 +1117,21 @@ private func keyboardCallback(
 
     // Handle modifier-only shortcuts (Ctrl+Shift, Cmd+Option, etc.)
     if type == .flagsChanged {
-        // Issue #150: Control key press clears buffer (rhythm break like EVKey)
+        // Issue #150: Control key press clears buffer (rhythm break like EVKey).
+        // Exception: when Ctrl is part of a modifier-only restore shortcut, defer the
+        // clear — otherwise raw_input is wiped before the user finishes the shortcut,
+        // and restore_to_raw() has nothing to restore.
         let isControlNowPressed = flags.contains(.maskControl)
+        let isControlJustReleased = !isControlNowPressed && wasControlPressed
         if isControlNowPressed, !wasControlPressed {
-            // Control just pressed - clear buffer to break rhythm
-            RustBridge.clearBuffer()
+            let restoreShortcutNeedsCtrl = AppState.shared.restoreShortcutEnabled
+                && currentRestoreShortcut.isModifierOnly
+                && CGEventFlags(rawValue: currentRestoreShortcut.modifiers).contains(.maskControl)
+            if restoreShortcutNeedsCtrl {
+                pendingControlRhythmBreak = true
+            } else {
+                RustBridge.clearBuffer()
+            }
         }
         wasControlPressed = isControlNowPressed
 
@@ -1125,9 +1139,12 @@ private func keyboardCallback(
         if AppState.shared.restoreShortcutEnabled, currentRestoreShortcut.isModifierOnly {
             if currentRestoreShortcut.matchesModifierOnly(flags: flags) {
                 wasRestoreModifierPressed = true
+                // Shortcut fully held - keep buffer for upcoming restore_to_raw
+                pendingControlRhythmBreak = false
             } else if wasRestoreModifierPressed {
                 wasRestoreModifierPressed = false
                 triggerRestoreShortcut(flags: flags, proxy: proxy)
+                pendingControlRhythmBreak = false
             }
         }
 
@@ -1138,6 +1155,12 @@ private func keyboardCallback(
             wasModifierShortcutPressed = false
             DispatchQueue.main.async { NotificationCenter.default.post(name: .toggleVietnamese, object: nil) }
         }
+
+        // Ctrl released without triggering restore shortcut: apply the deferred rhythm break
+        if isControlJustReleased, pendingControlRhythmBreak {
+            RustBridge.clearBuffer()
+            pendingControlRhythmBreak = false
+        }
         return Unmanaged.passUnretained(event)
     }
 
@@ -1146,6 +1169,9 @@ private func keyboardCallback(
     // Reset modifier state if any key is pressed while modifiers are held
     wasModifierShortcutPressed = false
     wasRestoreModifierPressed = false
+    // Ctrl+key shortcut (e.g., Ctrl+S): engine clears buffer itself when it sees ctrl=true,
+    // so the pending rhythm break is already handled.
+    pendingControlRhythmBreak = false
 
     if event.getIntegerValueField(.eventSourceUserData) == kEventMarker {
         return Unmanaged.passUnretained(event)
