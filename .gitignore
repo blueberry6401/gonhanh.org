@@ -52,6 +52,7 @@ obj/
 !.claude/skills/github-assistant/
 .claude/commands/*
 !.claude/commands/github.md
+!.claude/commands/merge-main.md
 .claude/.env*
 .claude/skills/.env*
 **/.claude/
