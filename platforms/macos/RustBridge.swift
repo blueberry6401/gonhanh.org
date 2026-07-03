@@ -2,6 +2,25 @@ import AppKit
 import Carbon
 import Foundation
 
+// MARK: - Accessibility helpers
+
+/// Create a system-wide AX element with a bounded messaging timeout.
+///
+/// AX attribute queries are synchronous IPC to the *focused* (foreign) app.
+/// Without a bound, a slow or busy app — common with Electron apps, or any app
+/// queried on the first keystroke right after an app switch — blocks the
+/// event-tap callback. If the callback stalls past the OS limit (~1s), macOS
+/// disables the tap entirely, killing input in every app until the process is
+/// relaunched. Setting the timeout on the system-wide element sets the default
+/// for all elements obtained through it. 0.1s is far above normal AX latency
+/// (~1-5ms) yet well under the tap timeout, so detection degrades to a fast
+/// fallback instead of hanging.
+func axSystemWideBounded() -> AXUIElement {
+    let element = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(element, 0.1)
+    return element
+}
+
 // MARK: - Debug Logging
 
 /// Debug logging - only active when /tmp/gonhanh_debug.log exists
@@ -326,7 +345,7 @@ private class TextInjector {
     /// Returns true if successful, false if caller should fallback to synthetic events
     func injectViaAX(bs: Int, text: String) -> Bool {
         // Get focused element
-        let systemWide = AXUIElementCreateSystemWide()
+        let systemWide = axSystemWideBounded()
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let ref = focusedRef
@@ -729,6 +748,74 @@ class RustBridge {
     }
 }
 
+// MARK: - Accessibility Keyboard Detection
+
+/// Bundle id of the macOS Accessibility Keyboard panel host (System Settings > Accessibility
+/// > Keyboard). The panel is drawn by the "AssistiveControl" input method
+/// (/System/Library/Input Methods/Assistive Control.app). Bundle id is the canonical,
+/// reverse-DNS, locale-independent identifier — preferred over the window owner name.
+private let kAccessibilityKeyboardBundleId = "com.apple.inputmethod.AssistiveControl"
+
+/// Whether the given CGWindowList entry is owned by the Accessibility Keyboard panel.
+/// Resolves the window's owner PID to its bundle id (the stable identifier).
+private func windowIsAccessibilityKeyboard(_ w: [String: Any]) -> Bool {
+    guard let pid = (w[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
+    return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == kAccessibilityKeyboardBundleId
+}
+
+/// Whether a click at the given screen point (NSEvent coordinates: bottom-left origin)
+/// lands on the macOS Accessibility Keyboard panel.
+///
+/// Walks the on-screen window list front-to-back and inspects the topmost visible window
+/// containing the point. Only window owner/bounds are read (no titles), so this needs no
+/// Screen Recording permission. Used to avoid clearing the composition buffer when the
+/// user taps a virtual key (issue #395).
+private func isClickOnAccessibilityKeyboard(_ nsPoint: CGPoint) -> Bool {
+    // Convert NSEvent screen coordinates (origin bottom-left of the primary display, y up)
+    // to CoreGraphics global coordinates (origin top-left of the primary display, y down).
+    guard let primary = NSScreen.screens.first else { return false }
+    let point = CGPoint(x: nsPoint.x, y: primary.frame.height - nsPoint.y)
+
+    guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+        as? [[String: Any]] else { return false }
+
+    for w in windows {
+        // Skip fully transparent overlay windows that would otherwise shadow the panel.
+        let alpha = (w[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1.0
+        if alpha <= 0.01 { continue }
+
+        guard let boundsDict = w[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+              !bounds.isEmpty, bounds.contains(point) else { continue }
+
+        // Topmost visible window under the click — decide based on its owner alone.
+        return windowIsAccessibilityKeyboard(w)
+    }
+    return false
+}
+
+/// Whether the macOS Accessibility Keyboard panel is currently visible on screen.
+///
+/// Its synthetic keystrokes are only visible at the session-level event tap (issue #395),
+/// so when the panel is up we transparently switch to that tap even if the user hasn't
+/// enabled the manual "remote desktop" toggle. Detects the panel (not just the background
+/// process) by requiring a panel-sized on-screen window owned by AssistiveControl.
+private func isAccessibilityKeyboardVisible() -> Bool {
+    guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+        as? [[String: Any]] else { return false }
+
+    for w in windows {
+        guard windowIsAccessibilityKeyboard(w) else { continue }
+        let alpha = (w[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1.0
+        if alpha <= 0.01 { continue }
+        guard let boundsDict = w[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { continue }
+        // The keyboard panel is large; ignore tiny helper/menu windows the process may own.
+        if bounds.width >= 200, bounds.height >= 80 { return true }
+    }
+    return false
+}
+
 // MARK: - Keyboard Hook Manager
 
 class KeyboardHookManager {
@@ -737,9 +824,18 @@ class KeyboardHookManager {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var mouseMonitor: Any? // NSEvent monitor for mouse clicks
+    private var watchdogTimer: Timer? // periodically re-enables a silently-disabled tap
     private var isRunning = false
+    private var currentTapIsSession = false // which tap level the active hook was created at
 
     private init() {}
+
+    /// Whether the keyboard hook should run at session-tap level: either the user enabled it
+    /// manually, or the Accessibility Keyboard panel is up and needs its synthetic events
+    /// captured (issue #395). The latter is detected live so the tap switches automatically.
+    private var wantsSessionTap: Bool {
+        AppState.shared.sessionTapMode || isAccessibilityKeyboardVisible()
+    }
 
     func start() {
         guard !isRunning else { return }
@@ -757,9 +853,13 @@ class KeyboardHookManager {
             (1 << CGEventType.flagsChanged.rawValue)
 
         // Session tap mode: intercept at cgSessionEventTap level so that synthetic events
-        // injected by remote desktop software (RustDesk, AnyDesk, TeamViewer) are visible.
+        // are visible — keystrokes from the macOS Accessibility Keyboard / on-screen
+        // keyboards (issue #395) and remote desktop software (RustDesk, AnyDesk, TeamViewer),
+        // all of which inject at session level and are invisible to the default HID tap.
         // Default (HID tap): highest priority, physical keystrokes only, best for most cases.
-        let tap: CFMachPort? = if AppState.shared.sessionTapMode {
+        let useSessionTap = wantsSessionTap
+        currentTapIsSession = useSessionTap
+        let tap: CFMachPort? = if useSessionTap {
             CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                               options: .defaultTap, eventsOfInterest: mask,
                               callback: keyboardCallback, userInfo: nil)
@@ -785,7 +885,37 @@ class KeyboardHookManager {
             isRunning = true
             setupShortcutObserver()
             startMouseMonitor()
+            startWatchdog()
         }
+    }
+
+    /// Periodically verify the event tap is still alive and re-enable it if not.
+    ///
+    /// macOS silently disables an event tap after a callback overruns the system
+    /// timeout. The callback receives a `.tapDisabledByTimeout` event, but if the
+    /// run loop is wedged or the disable arrives mid-injection that recovery path
+    /// does not always fire — leaving the IME dead in every app until the app is
+    /// relaunched. This timer recovers it within a couple seconds, unattended.
+    private func startWatchdog() {
+        watchdogTimer?.invalidate()
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // Issue #395: switch tap level when the Accessibility Keyboard panel appears or
+            // disappears, so its session-level keystrokes are captured only while it is up.
+            if self.wantsSessionTap != self.currentTapIsSession {
+                Log.info("auto tap-mode: session=\(self.wantsSessionTap) → restart")
+                self.restart()
+                return
+            }
+            guard let tap = self.eventTap else { return }
+            if !CGEvent.tapIsEnabled(tap: tap) {
+                CGEvent.tapEnable(tap: tap, enable: true)
+                Log.info("watchdog: event tap was disabled, re-enabled")
+            }
+        }
+        // .common so it keeps firing during menu/modal run-loop tracking too.
+        RunLoop.main.add(timer, forMode: .common)
+        watchdogTimer = timer
     }
 
     /// Start NSEvent global monitor for mouse events
@@ -793,6 +923,12 @@ class KeyboardHookManager {
     private func startMouseMonitor() {
         // Monitor both mouseDown and mouseUp to catch clicks and drag-selects
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { _ in
+            // Issue #395: tapping a key on the macOS Accessibility Keyboard (on-screen
+            // keyboard) is a mouse click on its panel. That panel is non-activating, so the
+            // text cursor never moves — clearing the buffer here would wipe each character
+            // before the next one arrives and Telex/VNI could never compose. Skip the clear
+            // for clicks that land on the keyboard panel itself.
+            if isClickOnAccessibilityKeyboard(NSEvent.mouseLocation) { return }
             RustBridge.clearBufferAll() // Clear everything including word history
             skipWordRestoreAfterClick = true
         }
@@ -800,6 +936,8 @@ class KeyboardHookManager {
 
     func stop() {
         guard isRunning else { return }
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let src = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes) }
         if let monitor = mouseMonitor { NSEvent.removeMonitor(monitor) }
@@ -838,12 +976,49 @@ class KeyboardHookManager {
     }
 }
 
+// MARK: - Modifier Chord Tracker
+
+/// Detects clean press-and-release of a modifier-only shortcut (e.g. Ctrl+Shift).
+///
+/// macOS `flagsChanged` events report the full bitmask of currently-held modifiers,
+/// not which key changed — so comparing the current flags to the shortcut can't tell
+/// a modifier *release* apart from a modifier *addition*. Pressing Cmd on top of
+/// Ctrl+Shift looks identical to releasing the combo (issue #399).
+///
+/// This tracks the high-water mark of modifiers held during a chord and reports the
+/// peak only on full release, and only if no non-modifier key was pressed mid-chord.
+struct ModifierChordTracker {
+    private var peak: CGEventFlags = []
+    private var invalidated = false
+
+    /// Feed a modifier-flag change (already masked to modifier bits).
+    /// Returns the peak modifiers iff the chord just completed cleanly
+    /// (all modifiers released, no key pressed during the chord); else nil.
+    mutating func modifiersChanged(to mods: CGEventFlags) -> CGEventFlags? {
+        guard !mods.isEmpty else {
+            let result = invalidated ? nil : peak
+            peak = []
+            invalidated = false
+            return result
+        }
+        // `mods` is already masked to modifier bits, so popcount == modifier count
+        // (allocation-free, unlike CGEventFlags.modifierCount).
+        if mods.rawValue.nonzeroBitCount > peak.rawValue.nonzeroBitCount { peak = mods }
+        return nil
+    }
+
+    /// Note a non-modifier key press; invalidates the chord if modifiers are held.
+    mutating func keyPressed(modifiersHeld mods: CGEventFlags) {
+        if !mods.isEmpty { invalidated = true }
+    }
+}
+
 // MARK: - Keyboard Callback
 
 private let kEventMarker: Int64 = 0x474E_4820 // "GNH "
 private let kModifierMask: CGEventFlags = [.maskSecondaryFn, .maskControl, .maskAlternate, .maskShift, .maskCommand]
-private var wasModifierShortcutPressed = false
-private var wasRestoreModifierPressed = false // Track modifier-only restore shortcut
+// Modifier-only shortcut detection state (see ModifierChordTracker).
+private var modifierChord = ModifierChordTracker()
 private var currentShortcut = KeyboardShortcut.load()
 private var currentRestoreShortcut = KeyboardShortcut.loadRestoreShortcut()
 private var isRecordingShortcut = false
@@ -867,7 +1042,7 @@ private var pendingControlRhythmBreak = false
 /// Returns the word only if cursor is right after a space/punctuation that follows a word
 /// This ensures we only restore when actually entering a word, not when deleting within a word
 private func getWordToRestoreOnBackspace() -> String? {
-    let systemWide = AXUIElementCreateSystemWide()
+    let systemWide = axSystemWideBounded()
     var focused: CFTypeRef?
 
     guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
@@ -1034,6 +1209,7 @@ private func keyboardCallback(
     proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon _: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        Log.info("tap disabled (type=\(type.rawValue)) → re-enabling")
         if let tap = KeyboardHookManager.shared.getTap() { CGEvent.tapEnable(tap: tap, enable: true) }
         return Unmanaged.passUnretained(event)
     }
@@ -1135,25 +1311,28 @@ private func keyboardCallback(
         }
         wasControlPressed = isControlNowPressed
 
-        // Handle modifier-only restore shortcut (e.g., Ctrl alone, Shift alone)
-        if AppState.shared.restoreShortcutEnabled, currentRestoreShortcut.isModifierOnly {
-            if currentRestoreShortcut.matchesModifierOnly(flags: flags) {
-                wasRestoreModifierPressed = true
-                // Shortcut fully held - keep buffer for upcoming restore_to_raw
-                pendingControlRhythmBreak = false
-            } else if wasRestoreModifierPressed {
-                wasRestoreModifierPressed = false
+        // Once the full restore combo is held, the deferred rhythm-break clear is no
+        // longer needed, regardless of which key in the combo releases first.
+        if AppState.shared.restoreShortcutEnabled, currentRestoreShortcut.isModifierOnly,
+           currentRestoreShortcut.matchesModifierOnly(flags: flags)
+        {
+            pendingControlRhythmBreak = false
+        }
+
+        // Fire toggle/restore only on a clean press-and-release of the exact combo
+        // (see ModifierChordTracker).
+        if let peak = modifierChord.modifiersChanged(to: flags.intersection(kModifierMask)) {
+            // Chord completed cleanly - evaluate against the peak modifiers held.
+            if AppState.shared.restoreShortcutEnabled,
+               currentRestoreShortcut.isModifierOnly,
+               currentRestoreShortcut.matchesModifierOnly(flags: peak)
+            {
                 triggerRestoreShortcut(flags: flags, proxy: proxy)
                 pendingControlRhythmBreak = false
             }
-        }
-
-        if matchesModifierOnlyShortcut(flags: flags) {
-            wasModifierShortcutPressed = true
-        } else if wasModifierShortcutPressed {
-            // Modifier combo was pressed and now released - toggle
-            wasModifierShortcutPressed = false
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .toggleVietnamese, object: nil) }
+            if matchesModifierOnlyShortcut(flags: peak) {
+                DispatchQueue.main.async { NotificationCenter.default.post(name: .toggleVietnamese, object: nil) }
+            }
         }
 
         // Ctrl released without triggering restore shortcut: apply the deferred rhythm break
@@ -1166,9 +1345,8 @@ private func keyboardCallback(
 
     guard type == .keyDown else { return Unmanaged.passUnretained(event) }
 
-    // Reset modifier state if any key is pressed while modifiers are held
-    wasModifierShortcutPressed = false
-    wasRestoreModifierPressed = false
+    // A key press while modifiers are held invalidates the chord (see ModifierChordTracker).
+    modifierChord.keyPressed(modifiersHeld: flags.intersection(kModifierMask))
     // Ctrl+key shortcut (e.g., Ctrl+S): engine clears buffer itself when it sees ctrl=true,
     // so the pending rhythm break is already handled.
     pendingControlRhythmBreak = false
@@ -1449,11 +1627,15 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     if let cached = DetectionCache.get() { return cached }
 
     // Slow path: query AX for focused element
-    let systemWide = AXUIElementCreateSystemWide()
+    let systemWide = axSystemWideBounded()
     var focused: CFTypeRef?
     var role: String?
     var bundleId: String?
 
+    // Time the AX IPC: if a focused app is slow to answer, this is what stalls
+    // the event-tap callback. The bounded messaging timeout caps each call, so a
+    // slow app shows up here as ~0.1s rather than a multi-second hang.
+    let axStart = Log.isEnabled ? CFAbsoluteTimeGetCurrent() : 0
     if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
        let el = focused
     {
@@ -1471,6 +1653,10 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
                 bundleId = app.bundleIdentifier
             }
         }
+    }
+    if Log.isEnabled {
+        let axMs = (CFAbsoluteTimeGetCurrent() - axStart) * 1000
+        if axMs > 30 { Log.info("AX detect slow: \(Int(axMs))ms app=\(bundleId ?? "nil")") }
     }
 
     // Fallback to frontmost app if we couldn't get bundle from focused element
@@ -1520,7 +1706,7 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     // GoNhanh's synthetic injections (backspace + Vietnamese char) are NOT forwarded,
     // causing garbled input on the remote. Passthrough lets raw keys reach the remote
     // intact; Vietnamese composition must happen on the remote machine itself.
-    let remoteDesktopApps: Set<String> = [
+    let remoteDesktopApps: Set = [
         "com.carriez.rustdesk", // RustDesk
         "com.philandro.anydesk", // AnyDesk
         "com.teamviewer.TeamViewer", // TeamViewer
@@ -1593,6 +1779,7 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     // Microsoft Office apps - backspace method (selection conflicts with autocomplete)
     if bundleId == "com.microsoft.Excel" { return cached(.slow, (3000, 8000, 3000), "slow:excel") }
     if bundleId == "com.microsoft.Word" { return cached(.slow, (3000, 8000, 3000), "slow:word") }
+    if bundleId == "com.microsoft.Outlook" { return cached(.slow, (8000, 15000, 8000), "slow:outlook") }
 
     // Electron apps - higher delays for Monaco editor
     if bundleId == "com.todesktop.230313mzl4w4u92" { return cached(.slow, (8000, 15000, 8000), "slow:claude") }
@@ -1602,7 +1789,7 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     // Includes: VSCode-based (VSCode, Cursor, Antigravity), terminals (Warp, Ghostty, Kitty, etc.)
     let codeApps = [
         // VSCode-based IDEs
-        "com.microsoft.VSCode", "com.google.antigravity", "com.todesktop.cursor",
+        "com.microsoft.VSCode", "com.google.antigravity-ide", "com.todesktop.cursor",
         "com.visualstudio.code.oss", "com.vscodium",
         // Terminals
         "dev.warp.Warp-Stable", "com.mitchellh.ghostty", "net.kovidgoyal.kitty",
@@ -1859,7 +2046,7 @@ class PerAppModeManager {
         spotlightChecked = true
 
         // Quick check: is Spotlight the focused element?
-        let systemWide = AXUIElementCreateSystemWide()
+        let systemWide = axSystemWideBounded()
         var focusedElement: CFTypeRef?
 
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success,

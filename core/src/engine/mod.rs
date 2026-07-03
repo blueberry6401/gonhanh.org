@@ -680,9 +680,39 @@ impl Engine {
                 return Result::none();
             }
 
+            // Backspace: pop the last accumulated char so the prefix stays in sync
+            // with the on-screen text. Without this, correcting a typo (e.g.
+            // "#hcn" -> Backspace -> "#hcm") falls through to the unknown-key
+            // branch below which clears the whole prefix, so the shortcut never
+            // matches on the following Space.
+            if key == keys::DELETE {
+                self.shortcut_prefix.pop();
+                return Result::none();
+            }
+
             // Break keys (punctuation): check for immediate shortcuts like "->"
             if keys::is_break_ext(key, shift) {
                 if let Some(ch) = break_key_to_char(key, shift) {
+                    // Word shortcuts must also fire on punctuation, not only on
+                    // Space/Enter. Match the accumulated prefix BEFORE the break
+                    // char is appended (e.g. "#hcm" then ","). key_char=None so the
+                    // break char is not appended — the platform types it after the
+                    // replacement. Mirrors the enabled-mode word-boundary behavior.
+                    if !self.shortcut_prefix.is_empty() {
+                        let input_method = self.current_input_method();
+                        if let Some(m) = self.shortcuts.try_match_for_method(
+                            &self.shortcut_prefix,
+                            None,
+                            true, // word boundary
+                            input_method,
+                        ) {
+                            let output: Vec<char> = m.output.chars().collect();
+                            let backspace_count = m.backspace_count as u8;
+                            self.shortcut_prefix.clear();
+                            return Result::send(backspace_count, &output);
+                        }
+                    }
+
                     self.shortcut_prefix.push(ch);
 
                     let input_method = self.current_input_method();
@@ -951,6 +981,11 @@ impl Engine {
                         // This state is lost on clear() but needed for correct horn placement
                         // Example: "duơ" restored → type "c" → should become "dươc"
                         self.re_detect_pending_u_horn();
+                        // Rebuild last_transform so a repeated modifier key still toggles
+                        // the diacritic off, exactly as it would before the word was
+                        // committed. Example: "sow" → "sơ" → Space → Backspace → "w"
+                        // must revert to "sow", not absorb the "w".
+                        self.re_detect_last_transform();
                         // Mark that buffer was restored - if user types new letter,
                         // clear buffer first (they want fresh word, not append)
                         self.restored_pending_clear = true;
@@ -2726,7 +2761,10 @@ impl Engine {
         // Telex: Check for delayed stroke pattern (d + vowels + d)
         // When buffer is "dod" and mark key is typed, apply stroke to initial 'd'
         // This enables "dods" → "đó" while preventing "de" + "d" → "đe"
+        // Skip if stroke was reverted (ddd → dd): user explicitly rejected đ,
+        // so a mark key must not resurrect the stroke (e.g., "dayddr" stays "daydr")
         let had_delayed_stroke = self.method == 0
+            && !self.stroke_reverted
             && self.buf.len() >= 2
             && self
                 .buf
@@ -4435,6 +4473,78 @@ impl Engine {
         }
     }
 
+    /// Reconstruct `last_transform` after a committed word is restored into the
+    /// buffer for further editing.
+    ///
+    /// The toggle/revert logic (`try_tone`, `try_mark`, `try_stroke`) decides
+    /// whether a repeated modifier key reverts a diacritic by inspecting
+    /// `last_transform`. That state is per-keystroke and is dropped when a word is
+    /// committed with Space, so a restored word would otherwise ignore the next
+    /// toggle key — e.g. restored "sơ" + "w" stayed "sơ" instead of reverting to
+    /// "sow". (Tone-mark keys s/f/r/x/j had a separate vowel-at-end revert path and
+    /// were unaffected, so the gap was tone-only.)
+    ///
+    /// We rebuild it from the diacritics on the final buffer character, mapping
+    /// each diacritic back to the modifier key that produces it in the current
+    /// method, so editing a restored word behaves like editing it before commit.
+    fn re_detect_last_transform(&mut self) {
+        use crate::data::chars::{mark, tone};
+
+        self.last_transform = None;
+        let is_vni = self.method == 1;
+
+        // These arms are the inverse of the forward key maps in input/telex.rs and
+        // input/vni.rs — keep them in sync if a method's bindings ever change.
+        //
+        // A tone mark (sắc/huyền/hỏi/ngã/nặng) is always the last diacritic applied
+        // to a syllable and may sit on a non-final vowel ("bía" marks 'í', not the
+        // trailing 'a'), so scan the whole buffer for it. A repeated mark key then
+        // reverts it after restore, re-arming whitelist auto-restore ("biass"→"bias").
+        if let Some(&c) = self.buf.iter().rev().find(|c| c.mark != mark::NONE) {
+            let key = if is_vni {
+                match c.mark {
+                    mark::HUYEN => keys::N2,
+                    mark::HOI => keys::N3,
+                    mark::NGA => keys::N4,
+                    mark::NANG => keys::N5,
+                    _ => keys::N1, // SAC
+                }
+            } else {
+                match c.mark {
+                    mark::HUYEN => keys::F,
+                    mark::HOI => keys::R,
+                    mark::NGA => keys::X,
+                    mark::NANG => keys::J,
+                    _ => keys::S, // SAC
+                }
+            };
+            self.last_transform = Some(Transform::Mark(key, c.mark));
+            return;
+        }
+
+        // A vowel tone (circumflex/horn/breve) only counts as the last transform when
+        // it is on the FINAL character. A trailing consonant means a later keystroke
+        // (the consonant) was the actual last action, so leave last_transform cleared —
+        // matching continuous typing where "tuân" + 'a' appends instead of reverting.
+        let Some(&c) = self.buf.last() else { return };
+        if c.tone != tone::NONE {
+            let key = if is_vni {
+                match c.tone {
+                    tone::CIRCUMFLEX => keys::N6,
+                    // HORN on 'a' is breve (key 8); on o/u it is horn (key 7).
+                    _ if c.key == keys::A => keys::N8,
+                    _ => keys::N7,
+                }
+            } else {
+                match c.tone {
+                    tone::CIRCUMFLEX => c.key, // a/e/o double themselves: aa→â
+                    _ => keys::W,              // horn & breve both use 'w'
+                }
+            };
+            self.last_transform = Some(Transform::Tone(key, c.tone));
+        }
+    }
+
     /// Clear everything including word history
     /// Used when cursor position changes (mouse click, arrow keys, etc.)
     /// to prevent accidental restore from stale history
@@ -4500,6 +4610,9 @@ impl Engine {
         if !self.buf.is_empty() {
             self.restored_pending_clear = true;
             self.restored_is_ascii = is_ascii;
+            // Rebuild last_transform so a repeated modifier key toggles the
+            // diacritic off, matching pre-commit editing behavior.
+            self.re_detect_last_transform();
         }
     }
 
