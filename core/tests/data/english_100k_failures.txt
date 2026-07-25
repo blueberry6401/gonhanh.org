@@ -1,6 +1,6 @@
 # English 100k Typing Variants Failures
 # Format: WORD \t VARIANT \t EXPECTED \t ACTUAL \t BUFFER
-# Total failures: 396
+# Total failures: 395
 
 been	been	been	bên	bên
 see	see	see	sê	sê
@@ -334,7 +334,6 @@ beekeeper	beeekeeeper	beekeeper	beekeeeper	bêekêeper
 geez	geeez	geez	geeez	gêez
 towson	towson	towson	tốn	tơson
 aag	aag	aag	âg	âg
-cowpox	cowpox	cowpox	cỗp	cơpox
 kawabata	kawwabata	kawabata	kawwabata	kăwabata
 hoon	hoon	hoon	hôn	hôn
 ddi	ddi	ddi	đi	đi

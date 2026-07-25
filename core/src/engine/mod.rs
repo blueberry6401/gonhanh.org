@@ -3041,6 +3041,28 @@ impl Engine {
             }
         }
 
+        // Checked-tone rule (issue #403): a syllable ending in a stop consonant
+        // (p, t, c, ch, k) can only carry sắc or nặng. huyền/hỏi/ngã on a
+        // stop-final syllable is phonologically impossible ("ỏt", "òc", "ãch"),
+        // so reject the mark and let the key fall through as a literal letter.
+        if !self.free_tone_enabled && matches!(mark_val, mark::HUYEN | mark::HOI | mark::NGA) {
+            let syllable = syllable::parse(&buffer_keys);
+            let is_stop_final = match syllable.final_c.len() {
+                1 => matches!(
+                    buffer_keys[syllable.final_c[0]],
+                    keys::P | keys::T | keys::C | keys::K
+                ),
+                2 => {
+                    buffer_keys[syllable.final_c[0]] == keys::C
+                        && buffer_keys[syllable.final_c[1]] == keys::H
+                }
+                _ => false,
+            };
+            if is_stop_final {
+                return None;
+            }
+        }
+
         // Skip modifier if buffer shows foreign word patterns.
         // Only check when NO horn/stroke transforms exist.
         //

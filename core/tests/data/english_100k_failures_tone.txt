@@ -1,7 +1,7 @@
 # English 100k Failures - Tone Markers
 # Cause: words ending with s/f/r/x/j trigger tone marks
 # Format: WORD \t ACTUAL \t BUFFER
-# Total: 1301 (+ 96 both)
+# Total: 1251 (+ 95 both)
 #
 # WORD: English word typed
 # ACTUAL: engine output after space
@@ -209,7 +209,6 @@ casts	cats	cats
 carr	car	car
 nests	nets	nets
 dwarf	dừa	dừa
-apr	ảp	ảp
 basics	baics	baics
 cops	cóp	cóp
 dams	dám	dám
@@ -250,7 +249,6 @@ oats	oát	oát
 chef	chè	chè
 doris	dói	dói
 ther	thẻ	thẻ
-ester	ểt	ểt
 bats	bát	bát
 lor	lỏ	lỏ
 lois	lói	lói
@@ -276,7 +274,6 @@ boer	boẻ	boẻ
 noses	noes	noes
 barr	bar	bar
 mer	mẻ	mẻ
-esters	ết	ết
 sachs	sách	sách
 ber	bẻ	bẻ
 sas	sá	sá
@@ -384,7 +381,6 @@ hops	hóp	hóp
 dips	díp	díp
 dwarfs	dứa	dứa
 casas	cas	cas
-ecr	ẻc	ẻc
 masts	mats	mats
 mists	mits	mits
 uf	ù	ù
@@ -465,7 +461,6 @@ swaps	sưáp	sưáp
 hoax	hoã	hoã
 mins	mín	mín
 aps	áp	áp
-epr	ẻp	ẻp
 nurs	nú	nú
 choirs	chói	chói
 hangar	hẩng	hẩng
@@ -546,7 +541,6 @@ trojans	troán	troán
 lias	lía	lía
 tur	tủ	tủ
 ner	nẻ	nẻ
-otros	ốt	ốt
 bores	boé	boé
 afr	ả	ả
 borer	boer	boer
@@ -575,7 +569,6 @@ soes	soé	soé
 mesons	meons	meons
 roars	roá	roá
 roms	róm	róm
-bakr	bảk	bảk
 goff	gof	gof
 liss	lis	lis
 tits	tít	tít
@@ -611,7 +604,6 @@ chats	chát	chát
 bestseller	betseller	betseller
 hor	hỏ	hỏ
 toasts	toats	toats
-ocr	ỏc	ỏc
 sams	sám	sám
 vax	vã	vã
 theor	thẻo	thẻo
@@ -644,7 +636,6 @@ neff	nef	nef
 tof	tò	tò
 rosas	roas	roas
 marais	mấi	mấi
-ipr	ỉp	ỉp
 sues	sué	sué
 wor	ưở	ưở
 hir	hỉ	hỉ
@@ -657,7 +648,6 @@ amr	ảm	ảm
 ries	rié	rié
 bij	bị	bị
 gur	gủ	gủ
-ospf	òp	òp
 rer	rẻ	rẻ
 mujeres	muế	muế
 trams	trám	trám
@@ -672,7 +662,6 @@ tors	tó	tó
 casings	caings	caings
 naps	náp	náp
 quests	quets	quets
-ipx	ĩp	ĩp
 hur	hủ	hủ
 hons	hón	hón
 voix	või	või
@@ -705,8 +694,6 @@ ques	qué	qué
 thiers	thié	thié
 nasr	nả	nả
 ecs	éc	éc
-itr	ỉt	ỉt
-atr	ảt	ảt
 isr	ỉ	ỉ
 ier	iẻ	iẻ
 surfer	suẻ	suẻ
@@ -720,11 +707,9 @@ anas	ấn	ấn
 kress	kres	kres
 macs	mác	mác
 mur	mủ	mủ
-icr	ỉc	ỉc
 baur	bảu	bảu
 hes	hé	hé
 vier	viẻ	viẻ
-echr	ẻch	ẻch
 darfur	dảu	dảu
 duets	duét	duét
 boars	boá	boá
@@ -752,7 +737,6 @@ bes	bé	bé
 dex	dẽ	dẽ
 tures	tué	tué
 armas	ấm	ấm
-ecf	èc	èc
 neusner	nểun	nểun
 dorms	dóm	dóm
 vex	vẽ	vẽ
@@ -774,7 +758,6 @@ aos	áo	áo
 vets	vét	vét
 bef	bè	bè
 tamas	tấm	tấm
-atf	àt	àt
 rif	rì	rì
 choix	chõi	chõi
 inr	ỉn	ỉn
@@ -786,8 +769,6 @@ durer	duer	duer
 aris	ái	ái
 gongs	góng	góng
 tans	tán	tán
-becher	bểch	bểch
-ietf	ièt	ièt
 haj	hạ	hạ
 mips	míp	míp
 gos	gó	gó
@@ -808,15 +789,12 @@ naf	nà	nà
 saks	sák	sák
 borers	boers	boers
 corsair	coải	coải
-acr	ảc	ảc
 vies	vié	vié
-ucr	ủc	ủc
 trims	trím	trím
 parsis	pái	pái
 kharif	khài	khài
 buf	bù	bù
 gurr	gur	gur
-icf	ìc	ìc
 dof	dò	dò
 busses	buses	buses
 maf	mà	mà
@@ -829,7 +807,6 @@ taux	tãu	tãu
 tanf	tàn	tàn
 yj	ỵ	ỵ
 reuss	reus	reus
-acf	àc	àc
 terr	ter	ter
 aur	ảu	ảu
 mesmer	mểm	mểm
@@ -869,12 +846,10 @@ tarr	tar	tar
 rufous	ruóu	ruóu
 doj	dọ	dọ
 ojos	ố	ố
-escher	ểch	ểch
 caf	cà	cà
 apj	ạp	ạp
 fetes	ffetes	fetes
 corsairs	coái	coái
-astr	ảt	ảt
 roxas	roá	roá
 veces	vếc	vếc
 iaf	ìa	ìa
@@ -883,7 +858,6 @@ arif	ài	ài
 hoists	hoits	hoits
 noms	nóm	nóm
 kronor	krổn	krổn
-hopf	hòp	hòp
 naxos	náo	náo
 thins	thín	thín
 dudes	đué	đué
@@ -944,17 +918,13 @@ tox	tõ	tõ
 hums	húm	húm
 dux	dũ	dũ
 moir	mỏi	mỏi
-wschr	ửch	ửch
 casus	cáu	cáu
-acrs	ác	ác
 esf	è	è
 quas	quá	quá
 iar	ỉa	ỉa
-erster	ểt	ểt
 mors	mó	mó
 exner	ển	ển
 suf	sù	sù
-perspex	pễp	pễp
 swf	sừ	sừ
 nif	nì	nì
 pemex	pễm	pễm
@@ -968,7 +938,6 @@ pwr	pử	pử
 asaf	ầ	ầ
 lems	lém	lém
 carus	cáu	cáu
-achr	ảch	ảch
 oes	oé	oé
 auras	ấu	ấu
 dus	dú	dú
@@ -984,7 +953,6 @@ nass	nas	nas
 darf	dà	dà
 ois	ói	ói
 maus	máu	máu
-cachar	cẩch	cẩch
 pws	pứ	pứ
 roams	roám	roám
 rusts	ruts	ruts
@@ -1002,7 +970,6 @@ aif	ài	ài
 dienes	diến	diến
 lotos	lốt	lốt
 goer	goẻ	goẻ
-ustr	ủt	ủt
 narr	nar	nar
 casos	cáo	cáo
 myr	mỷ	mỷ
@@ -1025,7 +992,6 @@ gyms	gým	gým
 dess	des	des
 ruses	rues	rues
 gaf	gà	gà
-rescher	rểch	rểch
 suas	súa	súa
 khas	khá	khá
 nips	níp	níp
@@ -1066,11 +1032,9 @@ nof	nò	nò
 qasr	qả	qả
 bursar	bủa	bủa
 coeff	coef	coef
-apf	àp	àp
 varnas	vấn	vấn
 nuys	nuý	nuý
 coef	coè	coè
-aspx	ãp	ãp
 curs	cú	cú
 recs	réc	réc
 ief	iè	iè
@@ -1105,7 +1069,6 @@ corms	cóm	cóm
 loris	lói	lói
 rans	rán	rán
 dims	dím	dím
-sachar	sẩch	sẩch
 suess	sues	sues
 lochs	lóch	lóch
 thur	thủ	thủ
@@ -1114,7 +1077,6 @@ trias	tría	tría
 daraus	dấu	dấu
 usus	úu	úu
 durr	dur	dur
-etf	èt	èt
 sauf	sàu	sàu
 swets	sưét	sưét
 efs	é	é
@@ -1124,11 +1086,9 @@ boj	bọ	bọ
 gir	gỉ	gỉ
 haf	hà	hà
 thaf	thà	thà
-etr	ẻt	ẻt
 khor	khỏ	khỏ
 cays	cáy	cáy
 theos	théo	théo
-iprs	íp	íp
 eres	ế	ế
 papas	pấp	pấp
 chos	chó	chó
@@ -1150,7 +1110,6 @@ euer	ểu	ểu
 chor	chỏ	chỏ
 burs	bú	bú
 ifrs	í	í
-itf	ìt	ìt
 gaor	gảo	gảo
 ofs	ó	ó
 taff	taf	taf
@@ -1213,7 +1172,6 @@ ajnr	ản	ản
 wus	ứu	ứu
 harar	har	har
 larix	lãi	lãi
-etfs	ét	ét
 kyr	kỷ	kỷ
 canr	cản	cản
 thier	thiẻ	thiẻ
@@ -1236,7 +1194,6 @@ sechs	séch	séch
 pois	pói	pói
 wps	ứp	ứp
 oems	oém	oém
-otr	ỏt	ỏt
 phasors	pháo	pháo
 aor	ảo	ảo
 parnas	pấn	pấn
@@ -1248,13 +1205,11 @@ roff	rof	rof
 oer	oẻ	oẻ
 enfer	ển	ển
 dox	dõ	dõ
-nachr	nảch	nảch
 kier	kiẻ	kiẻ
 kamaraj	kkamaraj	kamaraj
 unf	ùn	ùn
 demers	dếm	dếm
 maur	mảu	mảu
-aircrafts	aicrafts	aicrafts
 rauf	ràu	ràu
 mys	mý	mý
 coms	cóm	cóm
@@ -1266,19 +1221,15 @@ rur	rủ	rủ
 lins	lín	lín
 rej	rẹ	rẹ
 vues	vué	vué
-ipf	ìp	ìp
-lecher	lểch	lểch
 hots	hót	hót
 coss	cos	cos
 thej	thẹ	thẹ
 teos	téo	téo
 locos	lốc	lốc
 ays	áy	áy
-otf	òt	òt
 isf	ì	ì
 bwr	bử	bử
 laus	láu	láu
-botox	bỗt	bỗt
 basor	bảo	bảo
 thasos	tháo	tháo
 borns	bón	bón
@@ -1305,7 +1256,6 @@ viens	vién	vién
 gwr	gử	gử
 hamar	hẩm	hẩm
 anr	ản	ản
-utf	ùt	ùt
 rexx	rex	rex
 xanax	xẫn	xẫn
 laws	lắ	lắ
@@ -1393,7 +1343,6 @@ boons	bốn	bốn
 oor	ổ	ổ
 eer	ể	ể
 awacs	ấc	ấc
-cowpox	cỗp	cỗp
 maass	mas	mas
 thaws	thắ	thắ
 mees	mế	mế
