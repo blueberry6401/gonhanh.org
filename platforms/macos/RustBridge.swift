@@ -99,6 +99,17 @@ private enum Log {
     }
 }
 
+/// Human-readable modifier description for debug logs (e.g. "ctrl+shift").
+private func describeMods(_ flags: CGEventFlags) -> String {
+    var parts: [String] = []
+    if flags.contains(.maskSecondaryFn) { parts.append("fn") }
+    if flags.contains(.maskControl) { parts.append("ctrl") }
+    if flags.contains(.maskAlternate) { parts.append("opt") }
+    if flags.contains(.maskShift) { parts.append("shift") }
+    if flags.contains(.maskCommand) { parts.append("cmd") }
+    return parts.isEmpty ? "none" : parts.joined(separator: "+")
+}
+
 // MARK: - Constants
 
 private enum KeyCode {
@@ -859,6 +870,7 @@ class KeyboardHookManager {
         // Default (HID tap): highest priority, physical keystrokes only, best for most cases.
         let useSessionTap = wantsSessionTap
         currentTapIsSession = useSessionTap
+        Log.info("start(): tap=\(useSessionTap ? "session" : "hid") sessionTapModeSetting=\(AppState.shared.sessionTapMode) axKeyboardVisible=\(isAccessibilityKeyboardVisible())")
         let tap: CFMachPort? = if useSessionTap {
             CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                               options: .defaultTap, eventsOfInterest: mask,
@@ -1166,8 +1178,10 @@ func startRestoreShortcutRecording() {
 }
 
 func setupShortcutObserver() {
+    Log.info("initial toggle shortcut: key=\(currentShortcut.keyCode) mods=\(describeMods(CGEventFlags(rawValue: currentShortcut.modifiers))) isModifierOnly=\(currentShortcut.isModifierOnly)")
     shortcutObserver = NotificationCenter.default.addObserver(forName: .shortcutChanged, object: nil, queue: .main) { _ in
         currentShortcut = KeyboardShortcut.load()
+        Log.info("toggle shortcut changed: key=\(currentShortcut.keyCode) mods=\(describeMods(CGEventFlags(rawValue: currentShortcut.modifiers))) isModifierOnly=\(currentShortcut.isModifierOnly)")
     }
     restoreShortcutObserver = NotificationCenter.default.addObserver(forName: .restoreShortcutChanged, object: nil, queue: .main) { _ in
         currentRestoreShortcut = KeyboardShortcut.loadRestoreShortcut()
@@ -1175,7 +1189,11 @@ func setupShortcutObserver() {
 }
 
 private func matchesToggleShortcut(keyCode: UInt16, flags: CGEventFlags) -> Bool {
-    currentShortcut.matches(keyCode: keyCode, flags: flags)
+    let result = currentShortcut.matches(keyCode: keyCode, flags: flags)
+    if !currentShortcut.isModifierOnly, !flags.intersection(kModifierMask).isEmpty {
+        Log.info("toggle keyDown check: key=\(keyCode) mods=\(describeMods(flags)) saved=(key:\(currentShortcut.keyCode) mods:\(describeMods(CGEventFlags(rawValue: currentShortcut.modifiers)))) → \(result)")
+    }
+    return result
 }
 
 private func matchesRestoreShortcut(keyCode: UInt16, flags: CGEventFlags) -> Bool {
@@ -1227,6 +1245,7 @@ private func keyboardCallback(
     if isRecordingShortcut {
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let mods = flags.intersection(kModifierMask)
+        Log.info("recording: type=\(type == .keyDown ? "keyDown" : "flagsChanged") key=\(keyCode) mods=\(describeMods(mods)) isRestore=\(isRecordingRestoreShortcut)")
 
         // For restore shortcut recording: allow any single key (including ESC) or any modifier
         if isRecordingRestoreShortcut {
@@ -1283,6 +1302,7 @@ private func keyboardCallback(
         // Key + modifier: save shortcut (e.g., Ctrl+N, Cmd+Shift+N)
         if type == .keyDown, !mods.isEmpty {
             let captured = KeyboardShortcut(keyCode: keyCode, modifiers: mods.rawValue)
+            Log.info("recording: captured key+modifier key=\(keyCode) mods=\(describeMods(mods))")
             stopShortcutRecording()
             DispatchQueue.main.async { NotificationCenter.default.post(name: .shortcutRecorded, object: captured) }
             return nil
@@ -1323,6 +1343,9 @@ private func keyboardCallback(
         // (see ModifierChordTracker).
         if let peak = modifierChord.modifiersChanged(to: flags.intersection(kModifierMask)) {
             // Chord completed cleanly - evaluate against the peak modifiers held.
+            let toggleIsModOnly = currentShortcut.isModifierOnly
+            let toggleMatch = matchesModifierOnlyShortcut(flags: peak)
+            Log.info("chord released: peak=\(describeMods(peak)) toggleShortcutIsModifierOnly=\(toggleIsModOnly) toggleMatch=\(toggleMatch)")
             if AppState.shared.restoreShortcutEnabled,
                currentRestoreShortcut.isModifierOnly,
                currentRestoreShortcut.matchesModifierOnly(flags: peak)
@@ -1330,7 +1353,7 @@ private func keyboardCallback(
                 triggerRestoreShortcut(flags: flags, proxy: proxy)
                 pendingControlRhythmBreak = false
             }
-            if matchesModifierOnlyShortcut(flags: peak) {
+            if toggleMatch {
                 DispatchQueue.main.async { NotificationCenter.default.post(name: .toggleVietnamese, object: nil) }
             }
         }
