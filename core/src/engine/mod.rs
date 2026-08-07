@@ -1158,9 +1158,71 @@ impl Engine {
             caps
         };
 
+        // A physical Shift+letter that changes a lowercase run to uppercase starts a
+        // new case segment (for example, `useEffect`). Telex modifiers from the
+        // lowercase segment must not consume the uppercase key. Restore that segment
+        // to its literal keystrokes, then continue tracking the complete identifier.
+        let shifted_case_prefix_is_english = self.english_auto_restore
+            && english_dict::is_english_word(&self.get_raw_input_string().to_lowercase());
+        let starts_shifted_case_segment = self.method == 0
+            && shift
+            && effective_caps
+            && keys::is_letter(key)
+            && !self.buf.is_empty()
+            && self
+                .raw_input
+                .last()
+                .is_some_and(|(_, previous_caps, _)| !previous_caps);
+
         // Record raw keystroke for ESC restore (letters and numbers only)
         if keys::is_letter(key) || keys::is_number(key) {
             self.raw_input.push((key, effective_caps, shift));
+        }
+
+        if starts_shifted_case_segment {
+            let backspace = self.buf.len() as u8;
+            let raw_chars: Vec<char> = if shifted_case_prefix_is_english {
+                self.raw_input
+                    .iter()
+                    .filter_map(|&(raw_key, raw_caps, raw_shift)| {
+                        utils::key_to_char_ext(raw_key, raw_caps, raw_shift)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            self.buf.clear();
+            if shifted_case_prefix_is_english {
+                for &(raw_key, raw_caps, _) in &self.raw_input {
+                    self.buf.push(Char::new(raw_key, raw_caps));
+                }
+            } else {
+                // Preserve the already displayed Vietnamese segment and start a
+                // fresh composition buffer at the uppercase key.
+                self.raw_input.clear();
+                self.raw_input.push((key, effective_caps, shift));
+                self.buf.push(Char::new(key, effective_caps));
+            }
+            self.last_transform = None;
+            self.pending_breve_pos = None;
+            self.pending_u_horn_pos = None;
+            self.stroke_reverted = false;
+            self.had_mark_revert = false;
+            self.pending_mark_revert_pop = false;
+            self.had_any_transform = false;
+            self.had_vowel_triggered_circumflex = false;
+            self.had_circumflex_revert = false;
+            self.reverted_circumflex_key = None;
+            self.had_telex_transform = false;
+            self.telex_double_raw = None;
+            self.telex_double_raw_len = 0;
+
+            return if shifted_case_prefix_is_english {
+                Result::send(backspace, &raw_chars)
+            } else {
+                Result::none()
+            };
         }
 
         let result = self.process(key, effective_caps, shift);
@@ -2594,9 +2656,12 @@ impl Engine {
             }
 
             // Special case: switching from circumflex (uô) to horn compound (ươ)
-            // For standalone uo compound (no final consonant), add horn to adjacent 'u'
+            // Add horn to the adjacent 'u' so every uo + w sequence becomes ươ.
+            // A final consonant does not change this: `buocow` must become `bươc`.
             if tone_type == ToneType::Horn && self.has_uo_compound() {
-                // Check if this is a standalone compound (o is last vowel, no final consonant)
+                // VNI keeps the historical behavior for an open `uo` syllable:
+                // only add horn to `u` when there is no final consonant.
+                // Telex applies the requested rule even when a final exists.
                 let has_final = target_positions.iter().any(|&pos| {
                     pos + 1 < self.buf.len()
                         && self
@@ -2604,11 +2669,28 @@ impl Engine {
                             .get(pos + 1)
                             .is_some_and(|c| !keys::is_vowel(c.key))
                 });
+                let should_add_horn_to_u = self.method == 0 || !has_final;
 
-                if !has_final {
+                if should_add_horn_to_u {
                     for &pos in &target_positions {
                         if let Some(c) = self.buf.get(pos) {
                             if c.key == keys::O {
+                                // In a `qu` initial, `u` is part of the consonant cluster
+                                // and must stay plain (e.g. `quơ`, not `qươ`).
+                                let is_qu_initial = pos > 0
+                                    && self.buf.get(pos - 1).is_some_and(|prev| {
+                                        prev.key == keys::U
+                                            && pos > 1
+                                            && self
+                                                .buf
+                                                .get(pos - 2)
+                                                .is_some_and(|initial| initial.key == keys::Q)
+                                    });
+
+                                if is_qu_initial {
+                                    continue;
+                                }
+
                                 // Add horn to adjacent 'u' for compound
                                 if pos > 0 {
                                     if let Some(prev) = self.buf.get_mut(pos - 1) {
@@ -4725,6 +4807,24 @@ impl Engine {
             return None;
         }
 
+        // EXTRA DUPLICATE FINAL CONSONANT: keep the Vietnamese buffer when it is a valid
+        // Vietnamese syllable (carrying a diacritic) followed by an extra, user-typed
+        // duplicate of its final consonant. Example: typing "chức" then pressing 'c' again
+        // yields buffer "chứcc". Telex never generates a doubled final consonant on its own,
+        // so the duplicate is a deliberate keystroke → intentional Vietnamese, not English.
+        // Without this, "chứcc" reads as invalid Vietnamese and the loose English check
+        // wrongly restores the raw keystrokes "chucwsc".
+        //
+        // Exclude raw keystrokes that ARE a known English word (e.g. "watts" → "ưátt"): those
+        // should still restore. Gibberish like "chucwsc" is not in the dictionary, so the
+        // Vietnamese buffer wins. (Rare English words missing from the dictionary — detest,
+        // retest, phonon — stay Vietnamese; this is the accepted trade-off for keeping "chứcc".)
+        if self.has_extra_duplicate_final_consonant()
+            && !english_dict::is_english_word(&self.get_raw_input_string())
+        {
+            return None;
+        }
+
         // VIETNAMESE PRIORITY: Only keep Vietnamese when buffer has Vietnamese-SPECIFIC marks
         // Vietnamese-specific: circumflex (ô,â,ê), horn (ơ,ư), breve (ă), stroke (đ)
         // These marks indicate intentional Vietnamese typing
@@ -5862,6 +5962,80 @@ impl Engine {
         has_vowel
     }
 
+    /// Detect a buffer that is a valid Vietnamese syllable with a diacritic, followed by
+    /// an extra duplicate of its final consonant (e.g. "chức" + 'c' → "chứcc").
+    ///
+    /// Telex never emits a doubled final consonant on its own, so the trailing duplicate is
+    /// a literal keystroke the user typed on top of a complete Vietnamese syllable. Requiring
+    /// the base (minus the duplicate) to be valid Vietnamese AND to carry a Vietnamese
+    /// diacritic (tone or vowel mark) keeps plain English words that merely end in a doubled
+    /// consonant (ball, hall, off, ...) out of this branch — their base is not valid Vietnamese
+    /// and/or has no diacritic, so they still auto-restore normally.
+    fn has_extra_duplicate_final_consonant(&self) -> bool {
+        // `iter()` yields a slice iterator over the contiguous buffer, so `as_slice()` borrows
+        // it directly — no allocation, and the cheap scalar checks below can short-circuit the
+        // common (non-matching) case before any Vec is built.
+        let chars = self.buf.iter().as_slice();
+        let n = chars.len();
+        // Need at least: core syllable + final consonant + its duplicate.
+        if n < 3 {
+            return false;
+        }
+
+        let last = chars[n - 1];
+        let prev = chars[n - 2];
+        // Trailing char must duplicate the previous one, be a plain consonant, and carry
+        // no Vietnamese mark/tone of its own (a diacritic there would not be a raw duplicate).
+        if last.key != prev.key
+            || !keys::is_consonant(last.key)
+            || last.has_tone()
+            || last.has_mark()
+        {
+            return false;
+        }
+
+        // The intentional-Vietnamese pattern is: complete a consonant-final syllable, apply
+        // Telex modifiers to it, then re-type that final consonant — so in the raw keystrokes
+        // the two duplicate consonants are separated ONLY by modifier keys (w/s/f/r/x/j) and by
+        // at least one of them. Example: "chucwsc" → the two 'c's straddle "w s".
+        //
+        // A genuine English double consonant does NOT match: it is either typed back-to-back
+        // ("howitt" → h-o-w-i-t-t, the 't's are adjacent → nothing between) or separated by
+        // another vowel/consonant ("detest" → d-e-t-e-s-t, an 'e' sits between the 't's). Both
+        // still restore normally.
+        let dup_key = last.key;
+        let Some(p2) = self.raw_input.iter().rposition(|(k, _, _)| *k == dup_key) else {
+            return false;
+        };
+        let Some(p1) = self.raw_input[..p2]
+            .iter()
+            .rposition(|(k, _, _)| *k == dup_key)
+        else {
+            return false;
+        };
+        let modifiers = [keys::W, keys::S, keys::F, keys::R, keys::X, keys::J];
+        if p2 - p1 < 2
+            || !self.raw_input[p1 + 1..p2]
+                .iter()
+                .all(|(k, _, _)| modifiers.contains(k))
+        {
+            return false;
+        }
+
+        // The buffer WITHOUT the trailing duplicate must be a valid Vietnamese syllable...
+        let base = &chars[..n - 1];
+        let base_keys: Vec<u16> = base.iter().map(|c| c.key).collect();
+        let base_tones: Vec<u8> = base.iter().map(|c| c.tone).collect();
+        if !is_valid_with_tones_and_foreign(&base_keys, &base_tones, self.allow_foreign_consonants)
+        {
+            return false;
+        }
+
+        // ...and must carry a Vietnamese diacritic (tone or vowel mark), proving intentional
+        // Vietnamese input rather than a plain English word ending in a doubled consonant.
+        base.iter().any(|c| c.has_tone() || c.has_mark())
+    }
+
     /// Build raw chars from telex_double_raw (if stored) + subsequent raw_input,
     /// or fall back to converting all of raw_input to chars.
     ///
@@ -5886,6 +6060,22 @@ impl Engine {
                     if let Some(ch) = utils::key_to_char_ext(key, caps, shift) {
                         result.push(ch);
                     }
+                }
+
+                // `ww` explicitly reverts the w→ư shortcut to one literal `w`.
+                // When the revert is the current action, preserve that composed
+                // result even for exact English auto-restore paths. Subsequent
+                // input (for example a third `w`) is handled by the normal
+                // Telex-double reconstruction below.
+                let just_reverted_w_shortcut =
+                    matches!(self.last_transform, Some(Transform::WShortcutSkipped))
+                        && self.raw_input.len() == self.telex_double_raw_len;
+                if just_reverted_w_shortcut
+                    && result.len() >= 2
+                    && result[0].eq_ignore_ascii_case(&'w')
+                    && result[1].eq_ignore_ascii_case(&'w')
+                {
+                    result.remove(0);
                 }
                 return result;
             }
