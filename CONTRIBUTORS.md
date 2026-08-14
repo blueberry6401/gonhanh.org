@@ -88,6 +88,12 @@ Những người đã tin tưởng và ủng hộ dự án.
         <b>khang-nd</b> 🥈
       </a>
     </td>
+    <td align="center">
+      <a href="https://github.com/dathc0601">
+        <img src="https://avatars.githubusercontent.com/u/71875585?v=4" width="80" style="border-radius:50%"/><br/>
+        <b>dathc0601</b> 🥈
+      </a>
+    </td>
   </tr>
 </table>
 
