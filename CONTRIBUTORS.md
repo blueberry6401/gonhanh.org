@@ -543,9 +543,9 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
       </a>
     </td>
     <td align="center">
-      <a href="https://github.com/trandat2209">
+      <a href="https://github.com/dattran2209">
         <img src="https://avatars.githubusercontent.com/u/127843239?v=4" width="50" style="border-radius:50%"/><br/>
-        <b>trandat2209</b>
+        <b>dattran2209</b>
       </a>
     </td>
   </tr>
@@ -1317,6 +1317,6 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
 
 ---
 
-*Được cập nhật tự động · Lần cuối: 17/08/2026*
+*Được cập nhật tự động · Lần cuối: 18/08/2026*
 
 </div>
