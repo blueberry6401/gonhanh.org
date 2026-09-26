@@ -799,6 +799,12 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
       </a>
     </td>
     <td align="center">
+      <a href="https://github.com/maytinhdibo">
+        <img src="https://avatars.githubusercontent.com/u/6669725?v=4" width="50" style="border-radius:50%"/><br/>
+        <b>maytinhdibo</b>
+      </a>
+    </td>
+    <td align="center">
       <a href="https://github.com/betty2310">
         <img src="https://avatars.githubusercontent.com/u/75170473?v=4" width="50" style="border-radius:50%"/><br/>
         <b>betty2310</b>
@@ -816,14 +822,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>thaivh-tenozy</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/lamlqdev">
         <img src="https://avatars.githubusercontent.com/u/106105147?v=4" width="50" style="border-radius:50%"/><br/>
         <b>lamlqdev</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/buitranduong">
         <img src="https://avatars.githubusercontent.com/u/861090?v=4" width="50" style="border-radius:50%"/><br/>
@@ -854,14 +860,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>6c696e68</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/th1ennguyen">
         <img src="https://avatars.githubusercontent.com/u/173140971?v=4" width="50" style="border-radius:50%"/><br/>
         <b>th1ennguyen</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/VQToan">
         <img src="https://avatars.githubusercontent.com/u/33550738?v=4" width="50" style="border-radius:50%"/><br/>
@@ -892,14 +898,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>hieuvh</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/Luanium">
         <img src="https://avatars.githubusercontent.com/u/34064695?v=4" width="50" style="border-radius:50%"/><br/>
         <b>Luanium</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/fr0zenK">
         <img src="https://avatars.githubusercontent.com/u/17936346?v=4" width="50" style="border-radius:50%"/><br/>
@@ -930,14 +936,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>hanzomaster</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/ataxsinga05">
         <img src="https://avatars.githubusercontent.com/u/57646095?v=4" width="50" style="border-radius:50%"/><br/>
         <b>ataxsinga05</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/g-e-n-v">
         <img src="https://avatars.githubusercontent.com/u/68643009?v=4" width="50" style="border-radius:50%"/><br/>
@@ -968,14 +974,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>clbku</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/aobaharuki2005">
         <img src="https://avatars.githubusercontent.com/u/186453706?v=4" width="50" style="border-radius:50%"/><br/>
         <b>aobaharuki2005</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/chaochudicon1">
         <img src="https://avatars.githubusercontent.com/u/244681720?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1006,14 +1012,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>chrisangle</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/n1t2t03">
         <img src="https://avatars.githubusercontent.com/u/255063880?v=4" width="50" style="border-radius:50%"/><br/>
         <b>n1t2t03</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/huynhoriginals">
         <img src="https://avatars.githubusercontent.com/u/245494459?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1044,14 +1050,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>LoganMai</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/PyDude9">
         <img src="https://avatars.githubusercontent.com/u/126343628?v=4" width="50" style="border-radius:50%"/><br/>
         <b>PyDude9</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/trinm-pivot">
         <img src="https://avatars.githubusercontent.com/u/110025265?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1082,14 +1088,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>thanhnt-sm</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/postace-mf">
         <img src="https://avatars.githubusercontent.com/u/222170842?v=4" width="50" style="border-radius:50%"/><br/>
         <b>postace-mf</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/jackfeng94">
         <img src="https://avatars.githubusercontent.com/u/70943113?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1120,14 +1126,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>tehballade</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/PeterHa-UoH">
         <img src="https://avatars.githubusercontent.com/u/168889874?v=4" width="50" style="border-radius:50%"/><br/>
         <b>PeterHa-UoH</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/nguyenrom">
         <img src="https://avatars.githubusercontent.com/u/7044465?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1158,14 +1164,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>hanh090</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/ducphanvn">
         <img src="https://avatars.githubusercontent.com/u/250253616?v=4" width="50" style="border-radius:50%"/><br/>
         <b>ducphanvn</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/DucQA">
         <img src="https://avatars.githubusercontent.com/u/215292474?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1196,14 +1202,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>harrytranft</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/khangbinhdl">
         <img src="https://avatars.githubusercontent.com/u/82141543?v=4" width="50" style="border-radius:50%"/><br/>
         <b>khangbinhdl</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/linhnhatnguyenepita">
         <img src="https://avatars.githubusercontent.com/u/190347970?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1234,14 +1240,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>luanbt21</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/naoNao89">
         <img src="https://avatars.githubusercontent.com/u/90588855?v=4" width="50" style="border-radius:50%"/><br/>
         <b>naoNao89</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/bichkhe">
         <img src="https://avatars.githubusercontent.com/u/3736457?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1272,14 +1278,14 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
         <b>tuannx</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/sieumeo">
         <img src="https://avatars.githubusercontent.com/u/1964488?v=4" width="50" style="border-radius:50%"/><br/>
         <b>sieumeo</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/vulee123">
         <img src="https://avatars.githubusercontent.com/u/70649466?v=4" width="50" style="border-radius:50%"/><br/>
@@ -1306,18 +1312,18 @@ Những người đã báo lỗi, góp ý, và thảo luận giúp định hình
     </td>
     <td align="center">
       <a href="https://github.com/n3d06">
-        <img src="https://avatars.githubusercontent.com/u/217141310?v=4" width="50" style="border-radius:50%"/><br/>
+        <img src="https://avatars.githubusercontent.com/u/217141310?u=85e1f25ea6639fe05ccc09f906a34563fce7979b&v=4" width="50" style="border-radius:50%"/><br/>
         <b>n3d06</b>
       </a>
     </td>
+  </tr>
+  <tr>
     <td align="center">
       <a href="https://github.com/huyz">
         <img src="https://avatars.githubusercontent.com/u/128394?u=aaee556390ecf35d979057519bcb5e18ccc7123c&v=4" width="50" style="border-radius:50%"/><br/>
         <b>huyz</b>
       </a>
     </td>
-  </tr>
-  <tr>
     <td align="center">
       <a href="https://github.com/tungdtfgw">
         <img src="https://avatars.githubusercontent.com/u/233228717?u=1070e5bae72086e9036c2e4c128e500665df0167&v=4" width="50" style="border-radius:50%"/><br/>
