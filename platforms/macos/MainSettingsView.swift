@@ -77,6 +77,8 @@ class AppState: ObservableObject {
     }
 
     @Published private(set) var isSecureInputBlocked = false
+    /// App reported by macOS as holding Secure Input; nil when unknown or not blocked.
+    @Published private(set) var secureInputHolderName: String?
 
     var shouldShowSecureInputWarning: Bool {
         SecureInputPresentation.shouldShow(
@@ -86,11 +88,12 @@ class AppState: ObservableObject {
         )
     }
 
-    func setSecureInputBlocked(_ blocked: Bool) {
+    func setSecureInputBlocked(_ blocked: Bool, holderName: String? = nil) {
         guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.setSecureInputBlocked(blocked) }
+            DispatchQueue.main.async { [weak self] in self?.setSecureInputBlocked(blocked, holderName: holderName) }
             return
         }
+        secureInputHolderName = blocked ? holderName : nil
         guard isSecureInputBlocked != blocked else { return }
         isSecureInputBlocked = blocked
     }
@@ -190,6 +193,20 @@ class AppState: ObservableObject {
         }
     }
 
+    @Published var secondaryToggleShortcut: KeyboardShortcut {
+        didSet {
+            secondaryToggleShortcut.saveAsSecondaryToggle()
+            NotificationCenter.default.post(name: .secondaryShortcutChanged, object: nil)
+        }
+    }
+
+    @Published var secondaryToggleShortcutEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(secondaryToggleShortcutEnabled, forKey: SettingsKey.secondaryToggleShortcutEnabled)
+            NotificationCenter.default.post(name: .secondaryShortcutChanged, object: nil)
+        }
+    }
+
     @Published var advancedMode: Bool = false {
         didSet {
             UserDefaults.standard.set(advancedMode, forKey: SettingsKey.advancedMode)
@@ -252,6 +269,8 @@ class AppState: ObservableObject {
         currentMethod = InputMode(rawValue: defaults.integer(forKey: SettingsKey.method)) ?? .telex
         toggleShortcut = KeyboardShortcut.load()
         restoreShortcut = KeyboardShortcut.loadRestoreShortcut()
+        secondaryToggleShortcut = KeyboardShortcut.loadSecondaryToggle()
+        secondaryToggleShortcutEnabled = defaults.bool(forKey: SettingsKey.secondaryToggleShortcutEnabled)
         perAppModeEnabled = defaults.bool(forKey: SettingsKey.perAppMode)
         autoWShortcut = defaults.bool(forKey: SettingsKey.autoWShortcut)
         bracketShortcut = defaults.bool(forKey: SettingsKey.bracketShortcut)
@@ -349,7 +368,9 @@ class AppState: ObservableObject {
 
         // "Tắt" — disable Vietnamese for this app
         if profile.enabledState == -1 {
-            if profileSavedEnabled == nil { profileSavedEnabled = isEnabled }
+            if profileSavedEnabled == nil {
+                profileSavedEnabled = isEnabled
+            }
             RustBridge.setEnabled(false)
             setEnabledSilently(false)
             return
@@ -357,7 +378,9 @@ class AppState: ObservableObject {
 
         // "Bật" — force enable Vietnamese for this app
         if profile.enabledState == 1 {
-            if profileSavedEnabled == nil { profileSavedEnabled = isEnabled }
+            if profileSavedEnabled == nil {
+                profileSavedEnabled = isEnabled
+            }
             RustBridge.setEnabled(true)
             setEnabledSilently(true)
         }
@@ -442,9 +465,13 @@ class AppState: ObservableObject {
 
     func refreshLaunchAtLoginStatus() {
         let newStatus = LaunchAtLoginManager.shared.isEnabled
-        if newStatus != isLaunchAtLoginEnabled { isLaunchAtLoginEnabled = newStatus }
+        if newStatus != isLaunchAtLoginEnabled {
+            isLaunchAtLoginEnabled = newStatus
+        }
         // Clear manual requirement flag if now enabled
-        if isLaunchAtLoginEnabled { requiresManualLaunchAtLogin = false }
+        if isLaunchAtLoginEnabled {
+            requiresManualLaunchAtLogin = false
+        }
     }
 
     func enableLaunchAtLogin() {
@@ -679,6 +706,8 @@ struct KeyCap: View {
         Text(displayText)
             .font(.system(size: 11, weight: .medium))
             .foregroundColor(Color(NSColor.secondaryLabelColor))
+            .lineLimit(1)
+            .fixedSize() // Keep "⌃ control" on one line even when the row is width-constrained
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.8)))
@@ -724,7 +753,9 @@ struct SheetToolbar<Actions: View>: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let actions { actions }
+            if let actions {
+                actions
+            }
             Spacer()
             Button("Xong") { dismiss() }
                 .keyboardShortcut(.escape, modifiers: [])
@@ -750,7 +781,9 @@ struct ClickableTextField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context _: Context) {
-        if nsView.stringValue != text { nsView.stringValue = text }
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -831,10 +864,14 @@ struct MainSettingsView: View {
         .ignoresSafeArea()
         .frame(width: 700, height: 480)
         .onReceive(NotificationCenter.default.publisher(for: .showSettingsPage)) { notification in
-            if let page = notification.object as? NavigationPage { selectedPage = page }
+            if let page = notification.object as? NavigationPage {
+                selectedPage = page
+            }
         }
         .onChange(of: appState.advancedMode) { newValue in
-            if !newValue, selectedPage == .advanced { selectedPage = .settings }
+            if !newValue, selectedPage == .advanced {
+                selectedPage = .settings
+            }
         }
     }
 
@@ -916,7 +953,11 @@ struct UpdateBadgeView: View {
         .background(Capsule().fill(hovered ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.clear))
         .onHover { h in
             hovered = h
-            if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            if h {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
         }
         .onTapGesture {
             if updateManager.isReadyToInstall {
@@ -965,6 +1006,7 @@ struct NavButton: View {
 struct SettingsPageView: View {
     @ObservedObject var appState: AppState
     @State private var isRecordingShortcut = false
+    @State private var isRecordingSecondaryShortcut = false
     @State private var isRecordingRestoreShortcut = false
     @State private var showShortcutsSheet = false
 
@@ -977,7 +1019,7 @@ struct SettingsPageView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Bộ gõ đang tạm dừng")
                             .font(.system(size: 13, weight: .semibold))
-                        Text("macOS Secure Input đang chặn bộ gõ. Rời ô mật khẩu hoặc ứng dụng đang giữ Secure Input; Gõ Nhanh sẽ tự hoạt động lại.")
+                        Text(SecureInputPresentation.warningMessage(holderName: appState.secureInputHolderName))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -1014,6 +1056,13 @@ struct SettingsPageView: View {
             VStack(spacing: 0) {
                 ShortcutRecorderRow(shortcut: $appState.toggleShortcut,
                                     isRecording: $isRecordingShortcut)
+                Divider().padding(.leading, 12)
+                ShortcutRecorderRow(shortcut: $appState.secondaryToggleShortcut,
+                                    isRecording: $isRecordingSecondaryShortcut,
+                                    title: "Phím tắt bật/tắt thứ hai",
+                                    subtitle: "Khi bàn phím rời không có fn",
+                                    isEnabled: $appState.secondaryToggleShortcutEnabled,
+                                    duplicateOf: appState.toggleShortcut)
                 Divider().padding(.leading, 12)
                 RestoreShortcutRecorderRow(
                     shortcut: $appState.restoreShortcut,
@@ -1269,7 +1318,9 @@ struct ShortcutsSheet: View {
 
     private func deleteItem(_ id: UUID) {
         appState.shortcuts.removeAll { $0.id == id }
-        if editingId == id { clearForm() }
+        if editingId == id {
+            clearForm()
+        }
         selectedIds.remove(id)
     }
 
@@ -1431,33 +1482,62 @@ private let systemShortcuts: Set<String> = [
 struct ShortcutRecorderRow: View {
     @Binding var shortcut: KeyboardShortcut
     @Binding var isRecording: Bool
+    var title = "Bật/tắt bộ gõ"
+    var subtitle = "Nhấn để thay đổi"
+    /// When provided, shows an on/off switch and blocks recording while off.
+    var isEnabled: Binding<Bool>?
+    /// Another shortcut this one must not equal (e.g. the primary toggle for the secondary row).
+    var duplicateOf: KeyboardShortcut?
     @State private var hovered = false
     @State private var recordedObserver: NSObjectProtocol?
     @State private var cancelledObserver: NSObjectProtocol?
     @State private var windowObserver: NSObjectProtocol?
 
-    private var hasConflict: Bool {
-        systemShortcuts.contains(shortcut.displayParts.joined())
+    private var enabled: Bool { isEnabled?.wrappedValue ?? true }
+
+    private var conflictMessage: String? {
+        if let other = duplicateOf, other == shortcut {
+            return "Trùng với phím tắt bật/tắt chính"
+        }
+        if systemShortcuts.contains(shortcut.displayParts.joined()) {
+            return "Phím tắt này có thể xung đột với hệ thống"
+        }
+        return nil
     }
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Bật/tắt bộ gõ").font(.system(size: 13))
-                Text("Nhấn để thay đổi")
+                Text(title).font(.system(size: 13))
+                Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
             }
             Spacer()
-            shortcutDisplay
+            HStack(spacing: 8) {
+                shortcutDisplay
+                if let isEnabled {
+                    Toggle("", isOn: isEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background((hovered || isRecording) ? Color(NSColor.controlBackgroundColor).opacity(0.3) : .clear)
         .contentShape(Rectangle())
-        .onHover { hovered = $0 }
-        .onTapGesture { isRecording ? stopRecording() : startRecording() }
+        .onHover { hovered = enabled && $0 }
+        .onTapGesture {
+            guard enabled else { return }
+            isRecording ? stopRecording() : startRecording()
+        }
         .onDisappear { stopRecording() }
+        .onChange(of: enabled) { _ in
+            if isRecording {
+                stopRecording()
+            }
+        }
     }
 
     private var shortcutDisplay: some View {
@@ -1471,20 +1551,23 @@ struct ShortcutRecorderRow: View {
                     .background(RoundedRectangle(cornerRadius: 4).stroke(Color.accentColor, lineWidth: 1))
             } else {
                 ForEach(shortcut.displayParts, id: \.self) { KeyCap(text: $0) }
-                if hasConflict {
+                if let conflictMessage {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12))
                         .foregroundColor(.orange)
-                        .help("Phím tắt này có thể xung đột với hệ thống")
+                        .help(conflictMessage)
                 }
             }
         }
+        .opacity(enabled ? 1.0 : 0.5)
     }
 
     private func startRecording() {
         isRecording = true
         recordedObserver = NotificationCenter.default.addObserver(forName: .shortcutRecorded, object: nil, queue: .main) { notification in
-            if let captured = notification.object as? KeyboardShortcut { shortcut = captured }
+            if let captured = notification.object as? KeyboardShortcut {
+                shortcut = captured
+            }
             stopRecording()
         }
         cancelledObserver = NotificationCenter.default.addObserver(forName: .shortcutRecordingCancelled, object: nil, queue: .main) { _ in stopRecording() }
@@ -1540,7 +1623,9 @@ struct RestoreShortcutRecorderRow: View {
         }
         .onDisappear { stopRecording() }
         .onChange(of: isEnabled) { _ in
-            if isRecording { stopRecording() }
+            if isRecording {
+                stopRecording()
+            }
         }
     }
 
@@ -1563,7 +1648,9 @@ struct RestoreShortcutRecorderRow: View {
     private func startRecording() {
         isRecording = true
         recordedObserver = NotificationCenter.default.addObserver(forName: .shortcutRecorded, object: nil, queue: .main) { notification in
-            if let captured = notification.object as? KeyboardShortcut { shortcut = captured }
+            if let captured = notification.object as? KeyboardShortcut {
+                shortcut = captured
+            }
             stopRecording()
         }
         cancelledObserver = NotificationCenter.default.addObserver(forName: .shortcutRecordingCancelled, object: nil, queue: .main) { _ in stopRecording() }
@@ -1726,7 +1813,9 @@ struct AutoCapitalizeExcludedAppsSheet: View {
         allApps = apps.sorted { a, b in
             let aExcluded = excluded.contains(a.bundleId)
             let bExcluded = excluded.contains(b.bundleId)
-            if aExcluded != bExcluded { return aExcluded }
+            if aExcluded != bExcluded {
+                return aExcluded
+            }
             return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
         }
     }

@@ -1454,7 +1454,11 @@ fn w_medial_vowel_modifier_pattern() {
 
 #[test]
 fn double_consonant_auto_restore_missa_business() {
-    telex_auto_restore(&[("missa ", "misa "), ("bussiness ", "business ")]);
+    telex_auto_restore(&[
+        ("missa ", "misa "),
+        ("bussiness ", "business "),
+        ("assam ", "asam "),
+    ]);
 }
 
 // =============================================================================

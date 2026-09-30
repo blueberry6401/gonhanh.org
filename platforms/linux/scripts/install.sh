@@ -31,7 +31,7 @@ restart_fcitx() {
 profile_has_gonhanh() {
     [[ -f "$PROFILE" ]] || return 1
     awk '
-        /^\[Groups\/[0-9]+\/Items\/[0-9]+\]$/ { in_item = 1; next }
+        /^\[Groups\/[0-9][0-9]*\/Items\/[0-9][0-9]*\]$/ { in_item = 1; next }
         /^\[/ { in_item = 0 }
         in_item && $0 == "Name=gonhanh" { found = 1 }
         END { exit(found ? 0 : 1) }
@@ -83,7 +83,7 @@ remove_fcitx_profile_entry() {
     tmp="$(mktemp "${PROFILE}.tmp.XXXXXX")"
     awk '
         function flush() {
-            if (!(section ~ /^\[Groups\/[0-9]+\/Items\/[0-9]+\]$/ && body ~ /(^|\n)Name=gonhanh(\n|$)/)) {
+            if (!(section ~ /^\[Groups\/[0-9][0-9]*\/Items\/[0-9][0-9]*\]$/ && body ~ /(^|\n)Name=gonhanh(\n|$)/)) {
                 printf "%s", body
             }
             body = ""

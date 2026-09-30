@@ -6,7 +6,32 @@ import XCTest
 final class KeyboardShortcutTests: XCTestCase {
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: SettingsKey.toggleShortcut)
+        UserDefaults.standard.removeObject(forKey: SettingsKey.secondaryToggleShortcut)
+        UserDefaults.standard.removeObject(forKey: SettingsKey.secondaryToggleShortcutEnabled)
         super.tearDown()
+    }
+
+    // MARK: - Secondary Toggle Shortcut
+
+    func testSecondaryToggleDefaultDiffersFromPrimary() {
+        XCTAssertNotEqual(KeyboardShortcut.defaultSecondaryToggle, KeyboardShortcut.default)
+        XCTAssertEqual(KeyboardShortcut.loadSecondaryToggle(), .defaultSecondaryToggle)
+    }
+
+    func testSecondaryToggleSaveAndLoadIsIndependentOfPrimary() {
+        let secondary = KeyboardShortcut(keyCode: 0x00, modifiers: CGEventFlags([.maskCommand, .maskAlternate]).rawValue)
+        secondary.saveAsSecondaryToggle()
+
+        XCTAssertEqual(KeyboardShortcut.loadSecondaryToggle(), secondary)
+        XCTAssertEqual(KeyboardShortcut.load(), .default)
+    }
+
+    func testActiveSecondaryToggleIsNilUntilEnabled() {
+        KeyboardShortcut.defaultSecondaryToggle.saveAsSecondaryToggle()
+        XCTAssertNil(KeyboardShortcut.activeSecondaryToggle())
+
+        UserDefaults.standard.set(true, forKey: SettingsKey.secondaryToggleShortcutEnabled)
+        XCTAssertEqual(KeyboardShortcut.activeSecondaryToggle(), .defaultSecondaryToggle)
     }
 
     // MARK: - Default Shortcut
@@ -313,7 +338,9 @@ final class ModifierChordTrackerTests: XCTestCase {
         let shortcut = KeyboardShortcut(keyCode: 0xFFFF, modifiers: ctrlShift.rawValue)
         var tracker = ModifierChordTracker()
         for (i, flags) in sequence.enumerated() {
-            if keyPressedAt == i { tracker.keyPressed(modifiersHeld: flags) }
+            if keyPressedAt == i {
+                tracker.keyPressed(modifiersHeld: flags)
+            }
             if let peak = tracker.modifiersChanged(to: flags) {
                 return shortcut.matchesModifierOnly(flags: peak)
             }
@@ -444,5 +471,25 @@ final class SecureInputRecoveryTests: XCTestCase {
         XCTAssertFalse(SecureInputPresentation.shouldShow(
             engineEnabled: true, inputSourceAllowed: true, secureInputBlocked: false
         ))
+    }
+
+    func testHolderPIDReadsFirstPositiveSessionPID() {
+        XCTAssertNil(SecureInputHolder.holderPID(consoleUsers: []))
+        XCTAssertNil(SecureInputHolder.holderPID(consoleUsers: [["kCGSSessionUserNameKey": "a"]]))
+        XCTAssertNil(SecureInputHolder.holderPID(consoleUsers: [[SecureInputHolder.sessionPIDKey: 0]]))
+        XCTAssertEqual(
+            SecureInputHolder.holderPID(consoleUsers: [
+                ["kCGSSessionUserNameKey": "a"],
+                [SecureInputHolder.sessionPIDKey: 2463],
+            ]),
+            2463
+        )
+    }
+
+    func testWarningTextNamesHolderWhenKnown() {
+        XCTAssertTrue(SecureInputPresentation.warningMessage(holderName: "Chromium").hasPrefix("Chromium đang giữ"))
+        XCTAssertTrue(SecureInputPresentation.warningMessage(holderName: nil).hasPrefix("macOS Secure Input"))
+        XCTAssertTrue(SecureInputPresentation.tooltip(holderName: "Chromium").contains("Chromium"))
+        XCTAssertFalse(SecureInputPresentation.tooltip(holderName: nil).contains("("))
     }
 }
